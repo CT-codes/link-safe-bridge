@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
-    "name": "Link-Safe Lesezeichen-Spiegel",
-    "version": "1.2.0",
+    "name": "Link-Safe Bridge",
+    "version": "1.2.1",
     "description": "Spiegelt deine Link-Safe-Sammlung in die Lesezeichenleiste, speichert Seiten und Notizen nach Link-Safe und prüft die Sammlung auf tote Links.",
     "permissions": ["bookmarks", "storage", "alarms", "scripting", "activeTab"],
     "optional_permissions": ["webNavigation"],
@@ -11,7 +11,7 @@
     },
     "action": {
         "default_popup": "popup.html",
-        "default_title": "Link-Safe"
+        "default_title": "Link-Safe Bridge"
     },
     "options_page": "options.html",
     "icons": {

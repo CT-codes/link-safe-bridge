@@ -1,4 +1,4 @@
-# Link-Safe Saver (Chrome/Edge-Extension)
+# Link-Safe Bridge (Chrome/Edge-Extension)
 
 Die Browser-Erweiterung zu [Link-Safe](https://link-safe.taenzer.net). Sie kann dreierlei:
 
