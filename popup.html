@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: system-ui, "Segoe UI", sans-serif;
+            background: #16181d; color: #e9e7de;
+            width: 260px; margin: 0; padding: 16px;
+        }
+        h1 { font-size: 1rem; margin: 0 0 10px; }
+        h1 em { color: #4f8fd0; font-style: normal; }
+        #info { font-size: 0.82rem; color: #9a9890; min-height: 3.6em; white-space: pre-line; line-height: 1.5; }
+        button {
+            width: 100%; margin-top: 12px; padding: 9px 0;
+            background: #4f8fd0; color: #16181d; font-weight: 700;
+            border: none; border-radius: 8px; cursor: pointer; font-size: 13px;
+        }
+        button:disabled { opacity: 0.6; cursor: wait; }
+        button.secondary { background: #2b2f38; color: #e9e7de; }
+        a { display: block; margin-top: 10px; color: #4f8fd0; font-size: 0.78rem; text-align: center; }
+    </style>
+</head>
+<body>
+    <h1>Link-<em>Safe</em> Sync</h1>
+    <div id="info">Lade Status …</div>
+    <button id="sync">🔄 Jetzt synchronisieren</button>
+    <button id="check" class="secondary">🔍 Links prüfen</button>
+    <a href="#" id="openOptions">Optionen öffnen</a>
+    <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# Lokale Dateien, die nie ins Repo gehören
+.DS_Store
+*.log
+*.zip

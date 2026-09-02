@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Link-Safe Sync — Optionen</title>
+    <style>
+        body {
+            font-family: system-ui, "Segoe UI", sans-serif;
+            background: #16181d; color: #e9e7de;
+            max-width: 560px; margin: 40px auto; padding: 0 20px;
+        }
+        h1 { font-size: 1.3rem; }
+        h1 em { color: #4f8fd0; font-style: normal; }
+        label { display: block; margin: 18px 0 6px; font-weight: 600; }
+        input {
+            width: 100%; padding: 10px 12px; box-sizing: border-box;
+            background: #21252e; color: #e9e7de;
+            border: 1px solid #2b303b; border-radius: 8px; font-size: 14px;
+        }
+        input:focus { outline: none; border-color: #4f8fd0; }
+        .hint { font-size: 0.8rem; color: #9a9890; margin-top: 4px; }
+        .checkbox-row { display: flex; align-items: flex-start; gap: 8px; font-weight: 600; cursor: pointer; }
+        .checkbox-row input { width: auto; margin-top: 3px; accent-color: #4f8fd0; }
+        button {
+            margin-top: 20px; padding: 10px 24px;
+            background: #4f8fd0; color: #16181d; font-weight: 700;
+            border: none; border-radius: 8px; cursor: pointer; font-size: 14px;
+        }
+        button:hover { filter: brightness(1.1); }
+        #status { margin-top: 14px; font-size: 0.9rem; min-height: 1.2em; }
+        #status.ok { color: #5fbf7f; }
+        #status.err { color: #e07070; }
+    </style>
+</head>
+<body>
+    <h1>Link-<em>Safe</em> Lesezeichen-Spiegel</h1>
+    <p>Die Extension holt deine Links über die Link-Safe-API und spiegelt sie in den
+       Ordner „Link-Safe" der Lesezeichenleiste. Nur lesend — es wird nichts zurückgeschrieben.</p>
+
+    <label for="apiUrl">API-URL</label>
+    <input id="apiUrl" type="url" placeholder="https://deine-domain.de/api/index.php">
+    <div class="hint">Lokal: http://localhost:8000/api/index.php</div>
+
+    <label for="token">API-Token</label>
+    <input id="token" type="password" placeholder="Read-only-Token aus api/config.php">
+    <div class="hint">Der Token erlaubt nur Lese-Zugriffe (GET). Erzeugen mit:
+        php -r "echo bin2hex(random_bytes(32));"</div>
+
+    <label class="checkbox-row" for="direct">
+        <input id="direct" type="checkbox">
+        <span>Ordner direkt in die Lesezeichenleiste legen (ohne „Link-Safe"-Überordner)</span>
+    </label>
+    <div class="hint">Die Extension merkt sich per ID, welche Ordner ihr gehören —
+        eigene Lesezeichen und gleichnamige eigene Ordner bleiben unangetastet.
+        Aber: Nichts Eigenes IN die gespiegelten Ordner legen, sie werden bei
+        jedem Sync neu aufgebaut.</div>
+
+    <label class="checkbox-row" for="inlineFavs">
+        <input id="inlineFavs" type="checkbox">
+        <span>Favoriten-Links direkt auf die Leiste legen (ohne „Favoriten"-Ordner)</span>
+    </label>
+    <div class="hint">Nur im Direkt-Modus wirksam. Die Links aus „Favoriten"
+        erscheinen einzeln auf der Leiste, Unterordner der Favoriten
+        werden zu eigenen Ordnern.</div>
+
+    <button id="save">Speichern &amp; Verbindung testen</button>
+    <div id="status"></div>
+
+    <script src="options.js"></script>
+</body>
+</html>

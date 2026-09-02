@@ -1,0 +1,21 @@
+{
+    "manifest_version": 3,
+    "name": "Link-Safe Lesezeichen-Spiegel",
+    "version": "1.1.0",
+    "description": "Spiegelt deine Link-Safe-Sammlung als Ordner in die Lesezeichenleiste (einweg, automatisch alle 15 Minuten) und prüft sie auf tote Links.",
+    "permissions": ["bookmarks", "storage", "alarms", "scripting"],
+    "optional_host_permissions": ["http://*/*", "https://*/*"],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "action": {
+        "default_popup": "popup.html",
+        "default_title": "Link-Safe Sync"
+    },
+    "options_page": "options.html",
+    "icons": {
+        "16": "icon.png",
+        "48": "icon.png",
+        "128": "icon.png"
+    }
+}
