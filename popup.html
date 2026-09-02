@@ -18,13 +18,17 @@
         }
         button:disabled { opacity: 0.6; cursor: wait; }
         button.secondary { background: #2b2f38; color: #e9e7de; }
+        hr { border: none; border-top: 1px solid #2b303b; margin: 16px 0 4px; }
         a { display: block; margin-top: 10px; color: #4f8fd0; font-size: 0.78rem; text-align: center; }
     </style>
 </head>
 <body>
-    <h1>Link-<em>Safe</em> Sync</h1>
+    <h1>Link-<em>Safe</em></h1>
+    <button id="save-page">➕ Diese Seite speichern</button>
+    <button id="save-note" class="secondary">📝 Notiz schreiben</button>
+    <hr>
     <div id="info">Lade Status …</div>
-    <button id="sync">🔄 Jetzt synchronisieren</button>
+    <button id="sync" class="secondary">🔄 Jetzt synchronisieren</button>
     <button id="check" class="secondary">🔍 Links prüfen</button>
     <a href="#" id="openOptions">Optionen öffnen</a>
     <script src="popup.js"></script>

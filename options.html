@@ -63,6 +63,27 @@
         erscheinen einzeln auf der Leiste, Unterordner der Favoriten
         werden zu eigenen Ordnern.</div>
 
+    <label class="checkbox-row" for="mirrorSecondary">
+        <input id="mirrorSecondary" type="checkbox">
+        <span>Zweitablagen mitspiegeln (Link erscheint in jedem seiner Ordner)</span>
+    </label>
+    <div class="hint">Seit der Mehrfach-Ablage kann ein Link in mehreren Ordnern
+        liegen. Angehakt bekommt jeder dieser Ordner ein eigenes Lesezeichen —
+        dieselbe Adresse mehrfach, so wie in der App. Abgehakt erscheint der
+        Link nur an seinem Hauptort (Verhalten bis Version 1.1.0).</div>
+
+    <label class="checkbox-row" for="openInNewTab">
+        <input id="openInNewTab" type="checkbox">
+        <span>Gespiegelte Lesezeichen in einem neuen, aktiven Tab öffnen</span>
+    </label>
+    <div class="hint">Betrifft nur Lesezeichen aus dem Spiegel — eigene bleiben
+        unverändert. Chrome meldet Lesezeichen-Klicks nicht direkt, die Extension
+        erkennt sie an der ausgelösten Navigation: Der alte Tab fängt kurz
+        sichtbar an zu laden und springt dann dorthin zurück, wo er war. Aus
+        einem frisch geöffneten, leeren Tab heraus passiert nichts — dort ist die
+        Seite ohnehin richtig. Braucht die Berechtigungen „webNavigation" und
+        Zugriff auf alle Seiten; beides wird beim Speichern abgefragt.</div>
+
     <button id="save">Speichern &amp; Verbindung testen</button>
     <div id="status"></div>
 

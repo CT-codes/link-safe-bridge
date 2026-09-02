@@ -192,19 +192,48 @@ function writeIntoStagingDb(paket) {
     });
 }
 
-// "A/B/C"-Pfade in einen Baum überführen
-function buildTree(links) {
+// Ablageorte eines Links — Kurzfassung von placesOf() aus shared.js der App.
+// Die Wahrheit steht in link.folders = [{ path, order }, …], erster Eintrag ist
+// der Hauptort; link.folder ist nur dessen Spiegel. Bewusst eine Kopie und kein
+// Import: die Extension läuft in einem eigenen Kontext und soll ohne die App
+// startfähig bleiben. Wird die Regel in shared.js geändert, gehört sie hier nach.
+function placesOf(link) {
+    const seen = new Set();
+    const paths = [];
+    for (const raw of Array.isArray(link?.folders) ? link.folders : []) {
+        const path = String((typeof raw === 'string' ? raw : raw?.path) ?? '');
+        if (!path || seen.has(path)) continue;
+        seen.add(path);
+        paths.push(path);
+    }
+
+    const single = String(link?.folder || '');
+    if (!paths.length) return single ? [single] : [''];
+    // Ein Gerät auf älterem Stand hat den Hauptort verschoben, ohne `folders`
+    // zu kennen: sein `folder` gewinnt, die Zweitablagen bleiben stehen.
+    if (single && paths[0] !== single && !paths.includes(single)) {
+        return [single, ...paths.slice(1)];
+    }
+    return paths;
+}
+
+// "A/B/C"-Pfade in einen Baum überführen. Liegt ein Link in mehreren Ordnern,
+// erscheint er in jedem davon — Chrome erlaubt dieselbe URL beliebig oft.
+// Ohne mirrorSecondary bleibt es beim Hauptort (Verhalten bis 1.1.0).
+function buildTree(links, mirrorSecondary = true) {
     const root = { folders: new Map(), links: [] };
     for (const link of links) {
-        let node = root;
-        const path = (link.folder || '').split('/').filter(Boolean);
-        for (const segment of path) {
-            if (!node.folders.has(segment)) {
-                node.folders.set(segment, { folders: new Map(), links: [] });
+        const places = mirrorSecondary ? placesOf(link) : [placesOf(link)[0]];
+        for (const place of places) {
+            let node = root;
+            for (const segment of String(place || '').split('/').filter(Boolean)) {
+                if (!node.folders.has(segment)) {
+                    node.folders.set(segment, { folders: new Map(), links: [] });
+                }
+                node = node.folders.get(segment);
             }
-            node = node.folders.get(segment);
+            node.links.push(link);
         }
-        node.links.push(link);
     }
     return root;
 }
@@ -244,6 +273,7 @@ async function createTree(parentId, node, stats) {
                 url,
             });
             stats.created++;
+            stats.urls.add(url);
         } catch (e) {
             // Einzelner problematischer Link darf den Sync nicht abbrechen
             stats.skipped++;
@@ -253,12 +283,14 @@ async function createTree(parentId, node, stats) {
 
 async function syncBookmarks() {
     const { apiUrl, token } = await getConfig();
-    const { directMode = false, inlineFavorites = false, lastMode = null, mirrorIds = [] } =
-        await chrome.storage.local.get(['directMode', 'inlineFavorites', 'lastMode', 'mirrorIds']);
+    const { directMode = false, inlineFavorites = false, mirrorSecondary = true, lastMode = null, mirrorIds = [] } =
+        await chrome.storage.local.get(["directMode", "inlineFavorites", "mirrorSecondary", "lastMode", "mirrorIds"]);
 
     const links = await fetchAllLinks(apiUrl, token);
-    const tree = buildTree(links);
-    const stats = { created: 0, skipped: 0 };
+    const tree = buildTree(links, mirrorSecondary !== false);
+    // urls: Grundlage für den Klick-Abfang (openInNewTab) — nur Adressen, die
+    // wirklich als Lesezeichen entstanden sind, werden später abgefangen.
+    const stats = { created: 0, skipped: 0, urls: new Set() };
 
     // Direkt-Modus-Knoten vom letzten Sync entfernen. Die IDs stammen sicher
     // von uns — eigene Lesezeichen des Nutzers werden dadurch nie berührt.
@@ -305,6 +337,7 @@ async function syncBookmarks() {
                     });
                     newIds.push(node.id);
                     stats.created++;
+                    stats.urls.add(url);
                 } catch (e) {
                     stats.skipped++;
                 }
@@ -335,6 +368,7 @@ async function syncBookmarks() {
                 });
                 newIds.push(node.id);
                 stats.created++;
+                stats.urls.add(url);
             } catch (e) {
                 stats.skipped++;
             }
@@ -356,5 +390,100 @@ async function syncBookmarks() {
         await chrome.storage.local.set({ mirrorIds: [], lastMode: 'folder' });
     }
 
-    await setStatus(`✓ ${stats.created} Links synchronisiert`, stats.created, stats.skipped);
+    // Adressen des Spiegels festhalten: nur sie fängt der Klick-Abfang ab
+    await chrome.storage.local.set({ mirrorUrls: [...stats.urls] });
+
+    const mehrfach = stats.created > links.length ? ` aus ${links.length} Links` : '';
+    await setStatus(`✓ ${stats.created} Lesezeichen${mehrfach}`, stats.created, stats.skipped);
 }
+
+// ===============================
+// KLICK IN DER LESEZEICHENLEISTE: IN NEUEM, AKTIVEM TAB ÖFFNEN
+// ===============================
+//
+// Chrome meldet einer Extension NICHT, dass ein Lesezeichen angeklickt wurde —
+// die Bookmarks-API kann nur anlegen, ändern, löschen. Erkennbar ist der Klick
+// erst an der Navigation, die er auslöst: webNavigation.onCommitted liefert
+// transitionType "auto_bookmark". Deshalb dieser Umweg:
+//
+//   1. onCommitted sieht "auto_bookmark" und prüft, ob die Adresse aus unserem
+//      Spiegel stammt (mirrorUrls, beim Sync gefüllt)
+//   2. hat der Tab einen Verlauf, war er also vorher schon in Benutzung:
+//      neuer Tab daneben, aktiv — und der alte geht zurück, wo er war
+//   3. hat er keinen (frisch geöffneter Tab), bleibt alles wie es ist: dort
+//      ist die Seite ohnehin richtig aufgehoben
+//
+// Der Verlauf wird bewusst IM TAB gemessen (history.length) und nicht aus einem
+// gemerkten Vorzustand abgeleitet: Der Service Worker schläft nach ~30 s ein,
+// jeder gemerkte Zustand wäre beim nächsten Klick weg.
+//
+// Der alte Tab fängt sichtbar kurz an zu laden; das lässt sich nicht vermeiden,
+// ohne die echte URL aus dem Lesezeichen zu nehmen — dann wären Favicon und
+// "Adresse kopieren" hin.
+
+const openedByUs = new Map(); // URL → Zeitpunkt, gegen Endlosschleifen
+
+// > 1 heißt: im Tab stand vorher schon etwas. null = nicht messbar (fehlende
+// Berechtigung, chrome://-Seite, Tab schon weg) — dann fassen wir nichts an.
+async function tabHasHistory(tabId) {
+    try {
+        const [res] = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => history.length,
+        });
+        return typeof res?.result === 'number' ? res.result > 1 : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function isMirroredUrl(url) {
+    const { openInNewTab = false, mirrorUrls = [] } =
+        await chrome.storage.local.get(['openInNewTab', 'mirrorUrls']);
+    return openInNewTab && mirrorUrls.includes(url);
+}
+
+async function handleBookmarkNavigation(details) {
+    if (details.frameId !== 0) return;
+    if (details.transitionType !== 'auto_bookmark') return;
+
+    // Den Tab, den wir gerade selbst geöffnet haben, nicht erneut abfangen
+    const opened = openedByUs.get(details.url);
+    if (opened && Date.now() - opened < 3000) {
+        openedByUs.delete(details.url);
+        return;
+    }
+
+    if (!(await isMirroredUrl(details.url))) return;
+    if ((await tabHasHistory(details.tabId)) !== true) return;
+
+    try {
+        const tab = await chrome.tabs.get(details.tabId);
+        openedByUs.set(details.url, Date.now());
+        await chrome.tabs.create({
+            url: details.url,
+            active: true,
+            index: tab.index + 1,
+            openerTabId: details.tabId,
+            windowId: tab.windowId,
+        });
+        await chrome.tabs.goBack(details.tabId);
+    } catch (e) {
+        // Tab weg, kein Verlauf mehr, Berechtigung entzogen — dann hat der
+        // Klick eben im selben Tab geöffnet. Kein Grund abzubrechen.
+    }
+}
+
+// webNavigation ist eine optionale Berechtigung: ohne sie gibt es
+// chrome.webNavigation gar nicht. Nach dem Erteilen registrieren wir sofort
+// nach, sonst griffe der Abfang erst beim nächsten Start des Service Workers.
+function registerNavigationHooks() {
+    if (!chrome.webNavigation) return false;
+    if (!chrome.webNavigation.onCommitted.hasListener(handleBookmarkNavigation)) {
+        chrome.webNavigation.onCommitted.addListener(handleBookmarkNavigation);
+    }
+    return true;
+}
+
+chrome.permissions.onAdded.addListener(() => registerNavigationHooks());
+registerNavigationHooks();

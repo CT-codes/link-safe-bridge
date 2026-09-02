@@ -1,24 +1,30 @@
-# Link-Safe Lesezeichen-Spiegel (Chrome/Edge-Extension)
+# Link-Safe Saver (Chrome/Edge-Extension)
 
-Spiegelt deine Link-Safe-Sammlung als Ordner **„Link-Safe"** in die
-Lesezeichenleiste — einweg (Link-Safe → Browser), automatisch alle 15 Minuten.
-Eigene Lesezeichen außerhalb dieses Ordners werden nie angefasst.
+Die Browser-Erweiterung zu [Link-Safe](https://link-safe.taenzer.net). Sie kann dreierlei:
+
+- **Spiegeln:** deine Link-Safe-Sammlung als Ordner in der Lesezeichenleiste —
+  einweg (Link-Safe → Browser), automatisch alle 15 Minuten
+- **Speichern:** die aktuelle Seite oder eine schnelle Notiz nach Link-Safe geben
+- **Prüfen:** die Sammlung auf tote Links testen (Link-Rot-Wächter)
+
+Eigene Lesezeichen außerhalb des gespiegelten Ordners werden nie angefasst.
 
 ## Installation (entpackt laden)
 
-1. Chrome/Edge öffnen → Adresszeile: `chrome://extensions` (Edge: `edge://extensions`)
-2. Oben rechts **Entwicklermodus** aktivieren
-3. **„Entpackte Erweiterung laden"** → diesen Ordner (`extension/`) auswählen
-4. Extension-Icon anklicken → **Optionen öffnen**:
+1. Diesen Ordner herunterladen (grüner Knopf **Code → Download ZIP**) und entpacken
+2. Chrome/Edge öffnen → Adresszeile: `chrome://extensions` (Edge: `edge://extensions`)
+3. Oben rechts **Entwicklermodus** aktivieren
+4. **„Entpackte Erweiterung laden"** → den entpackten Ordner auswählen
+5. Extension-Icon anklicken → **Optionen öffnen**:
    - **API-URL**: lokal `http://localhost:8000/api/index.php`,
-     später `https://deine-domain.de/api/index.php`
+     sonst `https://deine-domain.de/api/index.php`
    - **Token**: der `api_token` aus `api/config.php`
-5. **Speichern & Verbindung testen** — beim Speichern fragt der Browser einmalig
+6. **Speichern & Verbindung testen** — beim Speichern fragt der Browser einmalig
    nach der Berechtigung für die API-Domain
-6. Der erste Sync startet sofort; danach alle 15 Minuten und jederzeit manuell
+7. Der erste Sync startet sofort; danach alle 15 Minuten und jederzeit manuell
    über das Popup („Jetzt synchronisieren")
 
-## Wie es funktioniert
+## Wie das Spiegeln funktioniert
 
 - Der Service Worker holt alle aktiven Links (`GET /links`, Read-only-Token,
   Papierkorb wird übersprungen) und baut die Ordnerstruktur im
@@ -26,6 +32,49 @@ Eigene Lesezeichen außerhalb dieses Ordners werden nie angefasst.
 - Der Token kann nur lesen — selbst wenn er in falsche Hände gerät,
   kann damit nichts verändert oder gelöscht werden. Deshalb schreibt auch die
   Link-Prüfung ihr Ergebnis nicht selbst zurück, sondern übergibt es der App
+
+### Zweitablagen (Mehrfach-Ablage)
+
+Ein Link kann in Link-Safe in mehreren Ordnern gleichzeitig liegen. Die Extension
+legt ihn dann in **jedem** dieser Ordner als Lesezeichen an — dieselbe Adresse
+mehrfach, so wie es die App zeigt. Wer das nicht will, hakt in den Optionen
+*„Zweitablagen mitspiegeln"* ab; dann erscheint jeder Link nur an seinem
+Hauptort, wie bis Version 1.1.0.
+
+## Seiten und Notizen speichern
+
+Im Popup:
+
+- **„➕ Diese Seite speichern"** übernimmt Titel und Adresse des aktuellen Tabs.
+  Ist auf der Seite Text markiert, wandert er als Notiz mit; sonst die
+  Meta-Beschreibung der Seite.
+- **„📝 Notiz schreiben"** öffnet direkt eine leere Notiz.
+
+Beides öffnet ein kleines Link-Safe-Fenster mit vorbefülltem Formular —
+gespeichert wird mit einem Klick in der App. Das hat einen Grund: Der API-Token
+darf ausschließlich lesen, schreiben kann nur die angemeldete App. So bleiben
+Ordnerwahl, Pflichtfelder und der Sync genau dort, wo sie hingehören, und die
+Extension muss das Datenmodell nicht kennen.
+
+## Klick öffnet einen neuen, aktiven Tab
+
+Optional (Schalter in den Optionen): Ein Klick auf ein **gespiegeltes** Lesezeichen
+öffnet die Seite in einem neuen Tab, der sofort im Vordergrund liegt. Eigene
+Lesezeichen bleiben unverändert.
+
+Chrome meldet einer Extension nicht, dass ein Lesezeichen angeklickt wurde — die
+Bookmarks-API kann nur anlegen, ändern und löschen. Erkennbar ist der Klick erst
+an der Navigation, die er auslöst (`webNavigation`, Übergangstyp
+`auto_bookmark`). Daraus folgen zwei sichtbare Eigenheiten:
+
+- Der alte Tab fängt kurz an zu laden und springt dann dorthin zurück, wo er war
+- Aus einem frisch geöffneten, leeren Tab heraus passiert nichts — dort ist die
+  Seite ohnehin richtig aufgehoben
+
+Dafür bleiben die Lesezeichen echte Lesezeichen: richtige Adresse, Favicon,
+„Link-Adresse kopieren", und ohne die Extension öffnen sie einfach wieder im
+selben Tab. Der Schalter fragt beim Speichern die Berechtigungen `webNavigation`
+und Zugriff auf alle Seiten ab (Letzteres, um im Tab den Verlauf zu messen).
 
 ## Links prüfen (Link-Rot-Wächter)
 
@@ -76,3 +125,6 @@ werden aufgeräumt.
 - Der Spiegel-Ordner wird pro Sync neu erzeugt — eigene Lesezeichen sollten
   nicht IN den „Link-Safe"-Ordner gelegt werden (sie würden beim nächsten
   Sync entfernt)
+- Gespeichert wird immer über ein Fenster der App, nie direkt aus dem Popup
+- Innerhalb eines Ordners stehen die Lesezeichen alphabetisch, nicht in der
+  eigenen Reihenfolge aus der App
