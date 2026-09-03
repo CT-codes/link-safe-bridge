@@ -48,10 +48,32 @@ async function getAppBase() {
     }
 }
 
-function openApp(url) {
-    // Eigenes Fenster statt Tab — wie beim Bookmarklet: Speichern ist ein
-    // kurzer Zwischenschritt, der den aktuellen Tab nicht verdrängen soll.
-    chrome.windows.create({ url, type: 'popup', width: 900, height: 700 });
+// Die App schaltet unter 851 CSS-Pixeln auf die Handyansicht um
+// (style-bem.css: @media (min-width: 851px)). chrome.windows.create rechnet in
+// Bildschirmpixeln — bei einer Windows-Skalierung von 125 % sind 900 davon nur
+// 720 CSS-Pixel, und das Speichern-Formular kam im Handylayout hoch. Deshalb
+// großzügig: 1280 breit, gedeckelt auf den verfügbaren Bildschirm.
+const FENSTER_BREITE = 1280;
+const FENSTER_HOEHE = 900;
+
+async function openApp(url) {
+    const { saveInTab = false } = await chrome.storage.local.get(['saveInTab']);
+    if (saveInTab) {
+        await chrome.tabs.create({ url, active: true });
+        window.close();
+        return;
+    }
+
+    const breite = Math.min(FENSTER_BREITE, Math.max(900, screen.availWidth - 80));
+    const hoehe = Math.min(FENSTER_HOEHE, Math.max(600, screen.availHeight - 80));
+    await chrome.windows.create({
+        url,
+        type: 'popup',
+        width: Math.round(breite),
+        height: Math.round(hoehe),
+        left: Math.round((screen.availWidth - breite) / 2),
+        top: Math.round((screen.availHeight - hoehe) / 2),
+    });
     window.close();
 }
 

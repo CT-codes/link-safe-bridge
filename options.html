@@ -27,6 +27,14 @@
             border: none; border-radius: 8px; cursor: pointer; font-size: 14px;
         }
         button:hover { filter: brightness(1.1); }
+        button.secondary { background: #2b2f38; color: #e9e7de; margin-right: 8px; }
+        h2 { font-size: 1rem; margin: 34px 0 10px; color: #9a9890; }
+        #diagnose-out {
+            white-space: pre-wrap; font-size: 0.82rem; line-height: 1.6;
+            background: #21252e; border-radius: 8px; padding: 12px 14px;
+            margin-top: 14px; font-family: ui-monospace, "Cascadia Mono", monospace;
+        }
+        #diagnose-out:empty { display: none; }
         #status { margin-top: 14px; font-size: 0.9rem; min-height: 1.2em; }
         #status.ok { color: #5fbf7f; }
         #status.err { color: #e07070; }
@@ -84,9 +92,27 @@
         Seite ohnehin richtig. Braucht die Berechtigungen „webNavigation" und
         Zugriff auf alle Seiten; beides wird beim Speichern abgefragt.</div>
 
+    <label class="checkbox-row" for="saveInTab">
+        <input id="saveInTab" type="checkbox">
+        <span>Speichern-Fenster als normalen Tab öffnen</span>
+    </label>
+    <div class="hint">Standard ist ein eigenes Fenster (1280 Pixel breit, damit
+        die App nicht in die Handyansicht rutscht — die beginnt unter 851
+        CSS-Pixeln). Wer lieber im gewohnten Fenster arbeitet, hakt das hier an.</div>
+
     <button id="save">Speichern &amp; Verbindung testen</button>
     <div id="status"></div>
 
+    <h2>Wenn etwas klemmt</h2>
+
+    <button id="diagnose" class="secondary">Klick-Abfang prüfen</button>
+    <button id="removeMirror" class="secondary">Spiegel aus der Leiste entfernen</button>
+    <div class="hint">„Spiegel entfernen" räumt den Ordner „Link-Safe" (auch
+        mehrfach vorhandene) und alle Einträge weg, die diese Installation direkt
+        auf die Leiste gelegt hat. Danach baut der nächste Sync alles neu auf.
+        Lesezeichen einer <em>anderen</em> Installation kann sie nicht erkennen —
+        die müssen von Hand weg.</div>
+    <pre id="diagnose-out"></pre>
     <script src="options.js"></script>
 </body>
 </html>

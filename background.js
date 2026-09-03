@@ -49,6 +49,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             .then((result) => sendResponse({ ok: true, ...result }))
             .catch((e) => sendResponse({ ok: false, error: e.message }));
         return true;
+
+    }
+    // Diagnose für die Optionsseite: Warum greift der Klick-Abfang (nicht)?
+    if (msg?.action === 'nav-status') {
+        navStatus()
+            .then((status) => sendResponse({ ok: true, ...status }))
+            .catch((e) => sendResponse({ ok: false, error: e.message }));
+        return true;
+    }
+
+    // Spiegel-Ordner aus der Leiste räumen (für einen sauberen Neuanfang)
+    if (msg?.action === 'remove-mirror') {
+        removeMirror()
+            .then((result) => sendResponse({ ok: true, ...result }))
+            .catch((e) => sendResponse({ ok: false, error: e.message }));
+        return true;
     }
 });
 
@@ -290,7 +306,7 @@ async function syncBookmarks() {
     const tree = buildTree(links, mirrorSecondary !== false);
     // urls: Grundlage für den Klick-Abfang (openInNewTab) — nur Adressen, die
     // wirklich als Lesezeichen entstanden sind, werden später abgefangen.
-    const stats = { created: 0, skipped: 0, urls: new Set() };
+    const stats = { created: 0, skipped: 0, entfernteDoppel: 0, urls: new Set() };
 
     // Direkt-Modus-Knoten vom letzten Sync entfernen. Die IDs stammen sicher
     // von uns — eigene Lesezeichen des Nutzers werden dadurch nie berührt.
@@ -377,7 +393,18 @@ async function syncBookmarks() {
     } else {
         // Standard: alles im Überordner "Link-Safe"
         const barChildren = await chrome.bookmarks.getChildren(BOOKMARKS_BAR_ID);
-        let mirror = barChildren.find((n) => !n.url && n.title === MIRROR_TITLE);
+        const spiegel = barChildren.filter((n) => !n.url && n.title === MIRROR_TITLE);
+
+        // Mehrere "Link-Safe"-Ordner entstehen, wenn zwei Installationen
+        // nebeneinander synchronisiert haben — etwa eine alte und eine neu
+        // geladene Kopie derselben Erweiterung. Der erste bleibt, die weiteren
+        // fliegen raus, sonst wächst die Leiste mit jedem Wechsel um eine Kopie.
+        for (const doppelt of spiegel.slice(1)) {
+            await chrome.bookmarks.removeTree(doppelt.id);
+            stats.entfernteDoppel++;
+        }
+
+        let mirror = spiegel[0];
         if (!mirror) {
             mirror = await chrome.bookmarks.create({ parentId: BOOKMARKS_BAR_ID, title: MIRROR_TITLE });
         }
@@ -394,7 +421,10 @@ async function syncBookmarks() {
     await chrome.storage.local.set({ mirrorUrls: [...stats.urls] });
 
     const mehrfach = stats.created > links.length ? ` aus ${links.length} Links` : '';
-    await setStatus(`✓ ${stats.created} Lesezeichen${mehrfach}`, stats.created, stats.skipped);
+    const doppel = stats.entfernteDoppel > 0
+        ? `, ${stats.entfernteDoppel} doppelten Spiegel entfernt`
+        : '';
+    await setStatus(`✓ ${stats.created} Lesezeichen${mehrfach}${doppel}`, stats.created, stats.skipped);
 }
 
 // ===============================
@@ -487,3 +517,49 @@ function registerNavigationHooks() {
 
 chrome.permissions.onAdded.addListener(() => registerNavigationHooks());
 registerNavigationHooks();
+
+// Diagnose für die Optionsseite. Beantwortet in einem Rutsch, was für den
+// Klick-Abfang zusammenkommen muss: Schalter an, beide Berechtigungen erteilt,
+// Adressen aus dem Spiegel bekannt, Listener registriert.
+async function navStatus() {
+    const { openInNewTab = false, mirrorUrls = [], lastSyncTime = null } =
+        await chrome.storage.local.get(['openInNewTab', 'mirrorUrls', 'lastSyncTime']);
+    const navPermission = await chrome.permissions.contains({ permissions: ['webNavigation'] });
+    const hostPermission = await chrome.permissions.contains({ origins: ['http://*/*', 'https://*/*'] });
+    return {
+        schalter: openInNewTab,
+        navPermission,
+        hostPermission,
+        adressen: mirrorUrls.length,
+        listener: !!chrome.webNavigation
+            && chrome.webNavigation.onCommitted.hasListener(handleBookmarkNavigation),
+        lastSyncTime,
+    };
+}
+
+// Alles entfernen, was die Erweiterung je in die Leiste gelegt hat: den
+// Überordner (auch mehrfach vorhandene) und die gemerkten Direkt-Modus-Knoten.
+// Für Reste einer ANDEREN Installation im Direkt-Modus reicht das nicht — deren
+// Lesezeichen-IDs kennt diese Installation nicht, die müssen von Hand weg.
+async function removeMirror() {
+    const { mirrorIds = [] } = await chrome.storage.local.get(['mirrorIds']);
+    let entfernt = 0;
+
+    for (const id of mirrorIds) {
+        try {
+            await chrome.bookmarks.removeTree(String(id));
+            entfernt++;
+        } catch (e) {
+            // Knoten war schon weg
+        }
+    }
+
+    const barChildren = await chrome.bookmarks.getChildren(BOOKMARKS_BAR_ID);
+    for (const node of barChildren.filter((n) => !n.url && n.title === MIRROR_TITLE)) {
+        await chrome.bookmarks.removeTree(node.id);
+        entfernt++;
+    }
+
+    await chrome.storage.local.set({ mirrorIds: [], mirrorUrls: [], lastMode: null });
+    return { entfernt };
+}

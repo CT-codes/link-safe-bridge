@@ -50,13 +50,19 @@ Im Popup:
   Meta-Beschreibung der Seite.
 - **„📝 Notiz schreiben"** öffnet direkt eine leere Notiz.
 
-Beides öffnet ein kleines Link-Safe-Fenster mit vorbefülltem Formular —
-gespeichert wird mit einem Klick in der App. Das hat einen Grund: Der API-Token
-darf ausschließlich lesen, schreiben kann nur die angemeldete App. So bleiben
+Beides öffnet ein Link-Safe-Fenster mit vorbefülltem Formular — gespeichert wird
+mit einem Klick in der App. Das hat einen Grund: Der API-Token darf
+ausschließlich lesen, schreiben kann nur die angemeldete App. So bleiben
 Ordnerwahl, Pflichtfelder und der Sync genau dort, wo sie hingehören, und die
 Extension muss das Datenmodell nicht kennen.
 
+Das Fenster ist 1280 Pixel breit (gedeckelt auf den Bildschirm), weil die App
+unter 851 CSS-Pixeln auf die Handyansicht umschaltet — und Bildschirmpixel sind
+bei einer Windows-Skalierung von 125 % oder 150 % deutlich weniger CSS-Pixel.
+Wem das Fenster trotzdem nicht passt, hakt in den Optionen *„Speichern-Fenster
+als normalen Tab öffnen"* an; dann gilt einfach die Breite des Hauptfensters.
 ## Klick öffnet einen neuen, aktiven Tab
+
 
 Optional (Schalter in den Optionen): Ein Klick auf ein **gespiegeltes** Lesezeichen
 öffnet die Seite in einem neuen Tab, der sofort im Vordergrund liegt. Eigene
@@ -75,6 +81,25 @@ Dafür bleiben die Lesezeichen echte Lesezeichen: richtige Adresse, Favicon,
 „Link-Adresse kopieren", und ohne die Extension öffnen sie einfach wieder im
 selben Tab. Der Schalter fragt beim Speichern die Berechtigungen `webNavigation`
 und Zugriff auf alle Seiten ab (Letzteres, um im Tab den Verlauf zu messen).
+
+## Wenn etwas klemmt
+
+Unten in den Optionen stehen zwei Knöpfe:
+
+- **„Klick-Abfang prüfen"** sagt in Klartext, welche der fünf Bedingungen fehlt:
+  Schalter an, Berechtigung `webNavigation`, Zugriff auf alle Seiten, Listener
+  im Hintergrund registriert, Adressen aus dem Spiegel bekannt.
+- **„Spiegel aus der Leiste entfernen"** räumt den Ordner „Link-Safe" (auch
+  mehrfach vorhandene) und alles weg, was *diese* Installation direkt auf die
+  Leiste gelegt hat. Der nächste Sync baut alles neu auf.
+
+**Mehrere Kopien der Sammlung in der Leiste?** Das passiert, wenn zwei
+Installationen nebeneinander synchronisiert haben — etwa eine alte und eine neu
+geladene Kopie der Erweiterung. Seit 1.2.2 führt jeder Sync mehrfach vorhandene
+„Link-Safe"-Ordner wieder zusammen und meldet das im Popup. Was eine **andere**
+Installation im Direkt-Modus lose auf die Leiste gelegt hat, erkennt diese hier
+nicht: Sie kennt deren Lesezeichen-IDs nicht. Solche Reste müssen von Hand weg
+(Lesezeichen-Manager mit `Strg`+`Umschalt`+`O`).
 
 ## Links prüfen (Link-Rot-Wächter)
 
