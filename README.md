@@ -61,8 +61,8 @@ unter 851 CSS-Pixeln auf die Handyansicht umschaltet — und Bildschirmpixel sin
 bei einer Windows-Skalierung von 125 % oder 150 % deutlich weniger CSS-Pixel.
 Wem das Fenster trotzdem nicht passt, hakt in den Optionen *„Speichern-Fenster
 als normalen Tab öffnen"* an; dann gilt einfach die Breite des Hauptfensters.
-## Klick öffnet einen neuen, aktiven Tab
 
+## Klick öffnet einen neuen, aktiven Tab
 
 Optional (Schalter in den Optionen): Ein Klick auf ein **gespiegeltes** Lesezeichen
 öffnet die Seite in einem neuen Tab, der sofort im Vordergrund liegt. Eigene
