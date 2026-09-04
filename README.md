@@ -88,7 +88,10 @@ Unten in den Optionen stehen zwei Knöpfe:
 
 - **„Klick-Abfang prüfen"** sagt in Klartext, welche der fünf Bedingungen fehlt:
   Schalter an, Berechtigung `webNavigation`, Zugriff auf alle Seiten, Listener
-  im Hintergrund registriert, Adressen aus dem Spiegel bekannt.
+  im Hintergrund registriert, Adressen aus dem Spiegel bekannt. Darunter steht
+  ein **Mitschnitt der letzten Lesezeichen-Klicks** samt Übergangstyp, den
+  Chrome gemeldet hat, und dem Grund, warum der Klick abgefangen wurde oder
+  eben nicht.
 - **„Spiegel aus der Leiste entfernen"** räumt den Ordner „Link-Safe" (auch
   mehrfach vorhandene) und alles weg, was *diese* Installation direkt auf die
   Leiste gelegt hat. Der nächste Sync baut alles neu auf.

@@ -133,6 +133,7 @@ document.getElementById('diagnose').addEventListener('click', async () => {
     }
 
     const ja = (b) => (b ? '✓' : '✗');
+    const kurz = (url) => (url && url.length > 62 ? url.slice(0, 59) + '…' : url || '');
     const zeilen = [
         `${ja(s.schalter)} Schalter „in neuem Tab öffnen" ist ${s.schalter ? 'an' : 'AUS'}`,
         `${ja(s.navPermission)} Berechtigung webNavigation`,
@@ -141,13 +142,22 @@ document.getElementById('diagnose').addEventListener('click', async () => {
         `${ja(s.adressen > 0)} ${s.adressen} Adressen aus dem Spiegel bekannt`,
         `   letzter Sync: ${s.lastSyncTime ? new Date(s.lastSyncTime).toLocaleString('de-DE') : 'noch keiner'}`,
     ];
+    if (s.beispiel) {
+        zeilen.push(`   Beispieladresse: ${kurz(s.beispiel)}`);
+    }
 
-    if (s.schalter && s.navPermission && s.hostPermission && s.listener && s.adressen > 0) {
-        zeilen.push('');
-        zeilen.push('Alles da. Greift der Klick trotzdem nicht: Er wirkt nur bei');
-        zeilen.push('gespiegelten Lesezeichen und nur in einem Tab, in dem vorher');
-        zeilen.push('schon eine Seite stand — aus einem leeren neuen Tab heraus');
-        zeilen.push('bleibt es absichtlich beim normalen Verhalten.');
+    zeilen.push('');
+    zeilen.push('Letzte Lesezeichen-Klicks:');
+    if (!s.navLog?.length) {
+        zeilen.push('   — noch nichts mitgeschnitten. Klick ein gespiegeltes');
+        zeilen.push('     Lesezeichen an und drück diesen Knopf erneut.');
+    } else {
+        for (const e of s.navLog) {
+            const uhr = new Date(e.zeit).toLocaleTimeString('de-DE');
+            zeilen.push(`   ${uhr}  ${e.ergebnis}`);
+            zeilen.push(`             Typ: ${e.typ} · im Spiegel: ${e.imSpiegel ? 'ja' : 'nein'}`);
+            zeilen.push(`             ${kurz(e.url)}`);
+        }
     }
     diagnoseBox.textContent = zeilen.join('\n');
 });

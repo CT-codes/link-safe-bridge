@@ -418,7 +418,8 @@ async function syncBookmarks() {
     }
 
     // Adressen des Spiegels festhalten: nur sie fängt der Klick-Abfang ab
-    await chrome.storage.local.set({ mirrorUrls: [...stats.urls] });
+    // In Vergleichsform ablegen — Chrome navigiert normalisiert (siehe canonicalUrl)
+    await chrome.storage.local.set({ mirrorUrls: [...stats.urls].map(canonicalUrl) });
 
     const mehrfach = stats.created > links.length ? ` aus ${links.length} Links` : '';
     const doppel = stats.entfernteDoppel > 0
@@ -427,6 +428,7 @@ async function syncBookmarks() {
     await setStatus(`✓ ${stats.created} Lesezeichen${mehrfach}${doppel}`, stats.created, stats.skipped);
 }
 
+// ===============================
 // ===============================
 // KLICK IN DER LESEZEICHENLEISTE: IN NEUEM, AKTIVEM TAB ÖFFNEN
 // ===============================
@@ -452,6 +454,40 @@ async function syncBookmarks() {
 // "Adresse kopieren" hin.
 
 const openedByUs = new Map(); // URL → Zeitpunkt, gegen Endlosschleifen
+const NAV_LOG_LAENGE = 12;
+
+/**
+ * Adresse in eine Vergleichsform bringen.
+ *
+ * Chrome normalisiert beim Navigieren: "https://example.com" im Lesezeichen
+ * wird zu "https://example.com/", der Host wird kleingeschrieben, Umlaute
+ * werden zu Punycode. Der rohe Stringvergleich gegen die gespeicherte Adresse
+ * geht deshalb ins Leere — das war der Grund, warum der Abfang trotz erfüllter
+ * Voraussetzungen nichts tat.
+ */
+function canonicalUrl(raw) {
+    try {
+        const url = new URL(String(raw || ''));
+        url.hash = '';
+        const text = url.href;
+        // "https://host/" und "https://host" sind dieselbe Seite
+        return url.pathname === '/' && !url.search ? text.replace(/\/$/, '') : text;
+    } catch (e) {
+        return String(raw || '');
+    }
+}
+
+// Mitschnitt der letzten Lesezeichen-Navigationen. Liegt in storage.session:
+// überlebt den Schlaf des Service Workers, verschwindet mit dem Browser.
+async function protokolliere(eintrag) {
+    try {
+        const { navLog = [] } = await chrome.storage.session.get(['navLog']);
+        navLog.unshift({ zeit: Date.now(), ...eintrag });
+        await chrome.storage.session.set({ navLog: navLog.slice(0, NAV_LOG_LAENGE) });
+    } catch (e) {
+        // Protokoll ist Diagnose, kein Zweck an sich
+    }
+}
 
 // > 1 heißt: im Tab stand vorher schon etwas. null = nicht messbar (fehlende
 // Berechtigung, chrome://-Seite, Tab schon weg) — dann fassen wir nichts an.
@@ -467,15 +503,21 @@ async function tabHasHistory(tabId) {
     }
 }
 
-async function isMirroredUrl(url) {
-    const { openInNewTab = false, mirrorUrls = [] } =
-        await chrome.storage.local.get(['openInNewTab', 'mirrorUrls']);
-    return openInNewTab && mirrorUrls.includes(url);
-}
-
 async function handleBookmarkNavigation(details) {
     if (details.frameId !== 0) return;
-    if (details.transitionType !== 'auto_bookmark') return;
+
+    const { openInNewTab = false, mirrorUrls = [] } =
+        await chrome.storage.local.get(['openInNewTab', 'mirrorUrls']);
+    if (!openInNewTab) return;
+
+    const istLesezeichen = details.transitionType === 'auto_bookmark';
+    const imSpiegel = mirrorUrls.includes(canonicalUrl(details.url));
+
+    // Normales Surfen interessiert hier nicht — protokolliert und geprüft wird
+    // nur, was nach einem Lesezeichen aussieht oder aus dem Spiegel stammt.
+    if (!istLesezeichen && !imSpiegel) return;
+
+    const notiz = { url: details.url, typ: details.transitionType, imSpiegel };
 
     // Den Tab, den wir gerade selbst geöffnet haben, nicht erneut abfangen
     const opened = openedByUs.get(details.url);
@@ -484,8 +526,23 @@ async function handleBookmarkNavigation(details) {
         return;
     }
 
-    if (!(await isMirroredUrl(details.url))) return;
-    if ((await tabHasHistory(details.tabId)) !== true) return;
+    if (!istLesezeichen) {
+        await protokolliere({ ...notiz, ergebnis: `kein Lesezeichen-Klick (${details.transitionType})` });
+        return;
+    }
+    if (!imSpiegel) {
+        await protokolliere({ ...notiz, ergebnis: 'Adresse nicht im Spiegel' });
+        return;
+    }
+
+    const verlauf = await tabHasHistory(details.tabId);
+    if (verlauf !== true) {
+        await protokolliere({
+            ...notiz,
+            ergebnis: verlauf === false ? 'leerer Tab — bleibt absichtlich hier' : 'Verlauf nicht messbar',
+        });
+        return;
+    }
 
     try {
         const tab = await chrome.tabs.get(details.tabId);
@@ -498,9 +555,9 @@ async function handleBookmarkNavigation(details) {
             windowId: tab.windowId,
         });
         await chrome.tabs.goBack(details.tabId);
+        await protokolliere({ ...notiz, ergebnis: '✓ in neuem Tab geöffnet' });
     } catch (e) {
-        // Tab weg, kein Verlauf mehr, Berechtigung entzogen — dann hat der
-        // Klick eben im selben Tab geöffnet. Kein Grund abzubrechen.
+        await protokolliere({ ...notiz, ergebnis: 'Fehler: ' + e.message });
     }
 }
 
@@ -520,10 +577,12 @@ registerNavigationHooks();
 
 // Diagnose für die Optionsseite. Beantwortet in einem Rutsch, was für den
 // Klick-Abfang zusammenkommen muss: Schalter an, beide Berechtigungen erteilt,
-// Adressen aus dem Spiegel bekannt, Listener registriert.
+// Adressen aus dem Spiegel bekannt, Listener registriert — dazu der Mitschnitt
+// der letzten Lesezeichen-Navigationen, der zeigt, was Chrome wirklich meldet.
 async function navStatus() {
     const { openInNewTab = false, mirrorUrls = [], lastSyncTime = null } =
         await chrome.storage.local.get(['openInNewTab', 'mirrorUrls', 'lastSyncTime']);
+    const { navLog = [] } = await chrome.storage.session.get(['navLog']);
     const navPermission = await chrome.permissions.contains({ permissions: ['webNavigation'] });
     const hostPermission = await chrome.permissions.contains({ origins: ['http://*/*', 'https://*/*'] });
     return {
@@ -531,9 +590,11 @@ async function navStatus() {
         navPermission,
         hostPermission,
         adressen: mirrorUrls.length,
+        beispiel: mirrorUrls[0] || null,
         listener: !!chrome.webNavigation
             && chrome.webNavigation.onCommitted.hasListener(handleBookmarkNavigation),
         lastSyncTime,
+        navLog,
     };
 }
 
