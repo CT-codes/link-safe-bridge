@@ -157,6 +157,15 @@ document.getElementById('diagnose').addEventListener('click', async () => {
             zeilen.push(`   ${uhr}  ${e.ergebnis}`);
             zeilen.push(`             Typ: ${e.typ} · im Spiegel: ${e.imSpiegel ? 'ja' : 'nein'}`);
             zeilen.push(`             ${kurz(e.url)}`);
+            if (e.startUrl) {
+                zeilen.push(`             kam von: ${kurz(e.startUrl)}`);
+            }
+            if (e.aehnliche?.length) {
+                zeilen.push('             im Spiegel steht zu diesem Host:');
+                for (const a of e.aehnliche) zeilen.push(`               ${kurz(a)}`);
+            } else if (e.aehnliche) {
+                zeilen.push('             zu diesem Host steht nichts im Spiegel');
+            }
         }
     }
     diagnoseBox.textContent = zeilen.join('\n');

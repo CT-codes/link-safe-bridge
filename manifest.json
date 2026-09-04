@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Link-Safe Bridge",
-    "version": "1.2.3",
+    "version": "1.2.4",
     "description": "Spiegelt deine Link-Safe-Sammlung in die Lesezeichenleiste, speichert Seiten und Notizen nach Link-Safe und prüft die Sammlung auf tote Links.",
     "permissions": ["bookmarks", "storage", "alarms", "scripting", "activeTab"],
     "optional_permissions": ["webNavigation"],

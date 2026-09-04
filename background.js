@@ -469,6 +469,12 @@ function canonicalUrl(raw) {
     try {
         const url = new URL(String(raw || ''));
         url.hash = '';
+        // Der abschließende Schrägstrich unterscheidet keine Seiten:
+        // ".../website/" und ".../website" sind dasselbe Ziel, und ob er im
+        // Lesezeichen steht oder in der Navigation auftaucht, ist Zufall.
+        if (!url.search && url.pathname.length > 1) {
+            url.pathname = url.pathname.replace(/\/+$/, '');
+        }
         const text = url.href;
         // "https://host/" und "https://host" sind dieselbe Seite
         return url.pathname === '/' && !url.search ? text.replace(/\/$/, '') : text;
@@ -503,6 +509,25 @@ async function tabHasHistory(tabId) {
     }
 }
 
+// Wohin ging es los? Bei einer Server-Umleitung meldet onCommitted NUR die
+// Zielseite — die steht dann zu Recht nicht im Spiegel, obwohl der Klick auf
+// ein gespiegeltes Lesezeichen ging. Die Startadresse steckt allein im
+// vorangehenden onBeforeNavigate, deshalb wird sie hier gemerkt. Rein im
+// Speicher und ohne await: Beide Ereignisse gehören zur selben Navigation,
+// dazwischen bleibt der Service Worker wach. Fehlt der Eintrag doch einmal,
+// zählt eben nur die Zieladresse.
+const navStart = new Map(); // tabId → { url, zeit }
+
+function merkeNavigationsstart(details) {
+    if (details.frameId !== 0) return;
+    navStart.set(details.tabId, { url: details.url, zeit: Date.now() });
+    if (navStart.size > 50) {
+        for (const [id, wert] of navStart) {
+            if (Date.now() - wert.zeit > 60000) navStart.delete(id);
+        }
+    }
+}
+
 async function handleBookmarkNavigation(details) {
     if (details.frameId !== 0) return;
 
@@ -511,13 +536,24 @@ async function handleBookmarkNavigation(details) {
     if (!openInNewTab) return;
 
     const istLesezeichen = details.transitionType === 'auto_bookmark';
-    const imSpiegel = mirrorUrls.includes(canonicalUrl(details.url));
+    const start = navStart.get(details.tabId);
+    navStart.delete(details.tabId);
+
+    // Ziel- und Startadresse zählen beide: Die eine trifft den Normalfall, die
+    // andere den Fall "Lesezeichen zeigt auf eine Adresse, die weiterleitet".
+    const kandidaten = [details.url];
+    if (start && start.url !== details.url && Date.now() - start.zeit < 60000) {
+        kandidaten.push(start.url);
+    }
+    const treffer = kandidaten.find((u) => mirrorUrls.includes(canonicalUrl(u)));
+    const imSpiegel = !!treffer;
 
     // Normales Surfen interessiert hier nicht — protokolliert und geprüft wird
     // nur, was nach einem Lesezeichen aussieht oder aus dem Spiegel stammt.
     if (!istLesezeichen && !imSpiegel) return;
 
     const notiz = { url: details.url, typ: details.transitionType, imSpiegel };
+    if (start && start.url !== details.url) notiz.startUrl = start.url;
 
     // Den Tab, den wir gerade selbst geöffnet haben, nicht erneut abfangen
     const opened = openedByUs.get(details.url);
@@ -531,7 +567,16 @@ async function handleBookmarkNavigation(details) {
         return;
     }
     if (!imSpiegel) {
-        await protokolliere({ ...notiz, ergebnis: 'Adresse nicht im Spiegel' });
+        // Für die Diagnose: Was steht denn zu diesem Host im Spiegel? Daran
+        // sieht man auf einen Blick, worin sich die Adressen unterscheiden.
+        let aehnliche = [];
+        try {
+            const host = new URL(details.url).host;
+            aehnliche = mirrorUrls.filter((u) => u.includes(host)).slice(0, 3);
+        } catch (e) {
+            // chrome-extension://… und Ähnliches hat keinen brauchbaren Host
+        }
+        await protokolliere({ ...notiz, ergebnis: 'Adresse nicht im Spiegel', aehnliche });
         return;
     }
 
@@ -567,6 +612,7 @@ async function handleBookmarkNavigation(details) {
 function registerNavigationHooks() {
     if (!chrome.webNavigation) return false;
     if (!chrome.webNavigation.onCommitted.hasListener(handleBookmarkNavigation)) {
+        chrome.webNavigation.onBeforeNavigate.addListener(merkeNavigationsstart);
         chrome.webNavigation.onCommitted.addListener(handleBookmarkNavigation);
     }
     return true;
