@@ -30,7 +30,7 @@ function show(text, ok) {
 }
 
 /**
- * Der Klick-Abfang braucht mehr als die API-Domain: "webNavigation", um die
+ * Die Mittelklick-Hilfe braucht mehr als die API-Domain: "webNavigation", um die
  * Lesezeichen-Navigation überhaupt zu sehen, und Zugriff auf alle Seiten, um im
  * Tab den Verlauf zu messen (history.length).
  *
@@ -47,7 +47,7 @@ openInNewTabInput.addEventListener('change', async () => {
     });
     if (!granted) {
         openInNewTabInput.checked = false;
-        show('Ohne die Berechtigung kann der Klick nicht abgefangen werden.', false);
+        show('Ohne die Berechtigung bleibt der Mittelklick beim Hintergrund-Tab.', false);
     } else {
         show('Berechtigung erteilt. Jetzt speichern — danach startet die Erweiterung einmal neu.', true);
     }
@@ -101,7 +101,7 @@ document.getElementById('save').addEventListener('click', async () => {
         const count = typeof data.total === 'number' ? data.total : data.items.length;
         show(`✓ Verbunden — ${count} Einträge gefunden. Sync läuft …`, true);
 
-        // Warten, bis der Spiegel steht: erst danach kennt der Klick-Abfang die
+        // Warten, bis der Spiegel steht: erst danach kennt die Mittelklick-Hilfe die
         // Adressen, und erst danach darf neu gestartet werden.
         const sync = await chrome.runtime.sendMessage({ action: 'sync-now' });
         if (!sync?.ok) {
@@ -135,9 +135,9 @@ document.getElementById('diagnose').addEventListener('click', async () => {
     const ja = (b) => (b ? '✓' : '✗');
     const kurz = (url) => (url && url.length > 62 ? url.slice(0, 59) + '…' : url || '');
     const zeilen = [
-        `${ja(s.schalter)} Schalter „in neuem Tab öffnen" ist ${s.schalter ? 'an' : 'AUS'}`,
+        `${ja(s.schalter)} Schalter „Mittelklick nach vorn" ist ${s.schalter ? 'an' : 'AUS'}`,
         `${ja(s.navPermission)} Berechtigung webNavigation`,
-        `${ja(s.hostPermission)} Zugriff auf alle Seiten (für die Verlaufsmessung)`,
+        `${ja(s.hostPermission)} Zugriff auf alle Seiten (damit Chrome die Navigationen meldet)`,
         `${ja(s.listener)} Listener im Hintergrund registriert`,
         `${ja(s.adressen > 0)} ${s.adressen} Adressen aus dem Spiegel bekannt`,
         `   letzter Sync: ${s.lastSyncTime ? new Date(s.lastSyncTime).toLocaleString('de-DE') : 'noch keiner'}`,
@@ -150,7 +150,8 @@ document.getElementById('diagnose').addEventListener('click', async () => {
     zeilen.push('Letzte Lesezeichen-Klicks:');
     if (!s.navLog?.length) {
         zeilen.push('   — noch nichts mitgeschnitten. Klick ein gespiegeltes');
-        zeilen.push('     Lesezeichen an und drück diesen Knopf erneut.');
+        zeilen.push('     Lesezeichen mit der MITTLEREN Maustaste an und drück');
+        zeilen.push('     diesen Knopf erneut.');
     } else {
         for (const e of s.navLog) {
             const uhr = new Date(e.zeit).toLocaleTimeString('de-DE');

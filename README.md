@@ -62,35 +62,41 @@ bei einer Windows-Skalierung von 125 % oder 150 % deutlich weniger CSS-Pixel.
 Wem das Fenster trotzdem nicht passt, hakt in den Optionen *„Speichern-Fenster
 als normalen Tab öffnen"* an; dann gilt einfach die Breite des Hauptfensters.
 
-## Klick öffnet einen neuen, aktiven Tab
+## Mittelklick holt den neuen Tab nach vorn
 
-Optional (Schalter in den Optionen): Ein Klick auf ein **gespiegeltes** Lesezeichen
-öffnet die Seite in einem neuen Tab, der sofort im Vordergrund liegt. Eigene
-Lesezeichen bleiben unverändert.
+Optional (Schalter in den Optionen): Ein **Mittelklick** auf ein gespiegeltes
+Lesezeichen öffnet die Seite in einem neuen Tab, der sofort im Vordergrund
+liegt. Der Linksklick bleibt unverändert und öffnet wie gewohnt im selben Tab;
+eigene Lesezeichen fasst die Extension nie an.
 
-Chrome meldet einer Extension nicht, dass ein Lesezeichen angeklickt wurde — die
-Bookmarks-API kann nur anlegen, ändern und löschen. Erkennbar ist der Klick erst
-an der Navigation, die er auslöst (`webNavigation`, Übergangstyp
-`auto_bookmark`). Daraus folgen zwei sichtbare Eigenheiten:
+Chrome macht dabei die halbe Arbeit schon selbst: Der Mittelklick öffnet
+ohnehin einen neuen Tab — nur eben im Hintergrund. Zu tun bleibt, ihn nach vorn
+zu holen. Dass der Klick aus der Lesezeichenleiste kam, erkennt die Extension
+an der ausgelösten Navigation (`webNavigation`, Übergangstyp `auto_bookmark`);
+ein Mittelklick auf einen Link *innerhalb* einer Seite meldet `link` und bleibt
+deshalb im Hintergrund, wo er hingehört.
 
-- Der alte Tab fängt kurz an zu laden und springt dann dorthin zurück, wo er war
-- Aus einem frisch geöffneten, leeren Tab heraus passiert nichts — dort ist die
-  Seite ohnehin richtig aufgehoben
+Bis Version 1.2.4 wurde stattdessen der Linksklick abgefangen: neuer Tab
+daneben, alter Tab wieder zurück. Das kostete ein sichtbares Anladen im alten
+Tab, einen halben Seitenaufruf beim Ziel und eine Verlaufsmessung per
+Skript-Injektion — und aus einem leeren neuen Tab heraus konnte es gar nicht
+greifen. Über den Mittelklick fällt das alles weg: Die Seite lädt genau einmal,
+im richtigen Tab.
 
-Dafür bleiben die Lesezeichen echte Lesezeichen: richtige Adresse, Favicon,
-„Link-Adresse kopieren", und ohne die Extension öffnen sie einfach wieder im
-selben Tab. Der Schalter fragt beim Speichern die Berechtigungen `webNavigation`
-und Zugriff auf alle Seiten ab (Letzteres, um im Tab den Verlauf zu messen).
+Die Lesezeichen bleiben dabei echte Lesezeichen: richtige Adresse, Favicon,
+„Link-Adresse kopieren". Der Schalter fragt beim Speichern die Berechtigungen
+`webNavigation` und Zugriff auf alle Seiten ab — Letzteres, damit Chrome die
+Navigationen überhaupt meldet.
 
 ## Wenn etwas klemmt
 
 Unten in den Optionen stehen zwei Knöpfe:
 
-- **„Klick-Abfang prüfen"** sagt in Klartext, welche der fünf Bedingungen fehlt:
+- **„Mittelklick prüfen"** sagt in Klartext, welche der fünf Bedingungen fehlt:
   Schalter an, Berechtigung `webNavigation`, Zugriff auf alle Seiten, Listener
   im Hintergrund registriert, Adressen aus dem Spiegel bekannt. Darunter steht
   ein **Mitschnitt der letzten Lesezeichen-Klicks** samt Übergangstyp, den
-  Chrome gemeldet hat, und dem Grund, warum der Klick abgefangen wurde oder
+  Chrome gemeldet hat, und dem Grund, warum der Tab nach vorn geholt wurde oder
   eben nicht.
 - **„Spiegel aus der Leiste entfernen"** räumt den Ordner „Link-Safe" (auch
   mehrfach vorhandene) und alles weg, was *diese* Installation direkt auf die

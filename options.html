@@ -82,15 +82,15 @@
 
     <label class="checkbox-row" for="openInNewTab">
         <input id="openInNewTab" type="checkbox">
-        <span>Gespiegelte Lesezeichen in einem neuen, aktiven Tab öffnen</span>
+        <span>Mittelklick auf ein gespiegeltes Lesezeichen: Tab sofort nach vorn</span>
     </label>
-    <div class="hint">Betrifft nur Lesezeichen aus dem Spiegel — eigene bleiben
-        unverändert. Chrome meldet Lesezeichen-Klicks nicht direkt, die Extension
-        erkennt sie an der ausgelösten Navigation: Der alte Tab fängt kurz
-        sichtbar an zu laden und springt dann dorthin zurück, wo er war. Aus
-        einem frisch geöffneten, leeren Tab heraus passiert nichts — dort ist die
-        Seite ohnehin richtig. Braucht die Berechtigungen „webNavigation" und
-        Zugriff auf alle Seiten; beides wird beim Speichern abgefragt.</div>
+    <div class="hint">Der Mittelklick öffnet in Chrome ohnehin einen neuen Tab —
+        nur im Hintergrund. Angehakt holt die Extension ihn sofort in den
+        Vordergrund. Betrifft ausschließlich Lesezeichen aus dem Spiegel; eigene
+        und der gewohnte Linksklick (gleicher Tab) bleiben unverändert. Braucht
+        die Berechtigungen „webNavigation" und Zugriff auf alle Seiten, damit
+        Chrome die Navigationen überhaupt meldet; beides wird beim Speichern
+        abgefragt.</div>
 
     <label class="checkbox-row" for="saveInTab">
         <input id="saveInTab" type="checkbox">
@@ -105,7 +105,7 @@
 
     <h2>Wenn etwas klemmt</h2>
 
-    <button id="diagnose" class="secondary">Klick-Abfang prüfen</button>
+    <button id="diagnose" class="secondary">Mittelklick prüfen</button>
     <button id="removeMirror" class="secondary">Spiegel aus der Leiste entfernen</button>
     <div class="hint">„Spiegel entfernen" räumt den Ordner „Link-Safe" (auch
         mehrfach vorhandene) und alle Einträge weg, die diese Installation direkt

@@ -429,31 +429,27 @@ async function syncBookmarks() {
 }
 
 // ===============================
-// ===============================
-// KLICK IN DER LESEZEICHENLEISTE: IN NEUEM, AKTIVEM TAB ÖFFNEN
+// MITTELKLICK IN DER LESEZEICHENLEISTE: DEN NEUEN TAB NACH VORN HOLEN
 // ===============================
 //
 // Chrome meldet einer Extension NICHT, dass ein Lesezeichen angeklickt wurde —
 // die Bookmarks-API kann nur anlegen, ändern, löschen. Erkennbar ist der Klick
 // erst an der Navigation, die er auslöst: webNavigation.onCommitted liefert
-// transitionType "auto_bookmark". Deshalb dieser Umweg:
+// transitionType "auto_bookmark".
 //
-//   1. onCommitted sieht "auto_bookmark" und prüft, ob die Adresse aus unserem
-//      Spiegel stammt (mirrorUrls, beim Sync gefüllt)
-//   2. hat der Tab einen Verlauf, war er also vorher schon in Benutzung:
-//      neuer Tab daneben, aktiv — und der alte geht zurück, wo er war
-//   3. hat er keinen (frisch geöffneter Tab), bleibt alles wie es ist: dort
-//      ist die Seite ohnehin richtig aufgehoben
+// Beim Mittelklick macht Chrome die halbe Arbeit schon selbst: Es öffnet einen
+// neuen Tab — nur eben im Hintergrund. Zu tun bleibt genau eins:
 //
-// Der Verlauf wird bewusst IM TAB gemessen (history.length) und nicht aus einem
-// gemerkten Vorzustand abgeleitet: Der Service Worker schläft nach ~30 s ein,
-// jeder gemerkte Zustand wäre beim nächsten Klick weg.
+//   1. onCommitted sieht "auto_bookmark" in einem Tab, der NICHT im Vordergrund
+//      liegt — das ist der Hintergrund-Tab eines Mittelklicks (oder Strg+Klick)
+//   2. stammt die Adresse aus unserem Spiegel: Tab nach vorn holen
 //
-// Der alte Tab fängt sichtbar kurz an zu laden; das lässt sich nicht vermeiden,
-// ohne die echte URL aus dem Lesezeichen zu nehmen — dann wären Favicon und
-// "Adresse kopieren" hin.
+// Der Linksklick bleibt dabei unangetastet und öffnet wie gewohnt im selben Tab.
+// Bis 1.2.4 wurde er abgefangen (neuer Tab daneben, alter Tab zurück) — das
+// kostete ein sichtbares Anladen im alten Tab, einen halben Seitenaufruf und
+// eine Verlaufsmessung per Skript-Injektion. Über den Mittelklick fällt das
+// alles weg: Die Seite lädt genau einmal, im richtigen Tab.
 
-const openedByUs = new Map(); // URL → Zeitpunkt, gegen Endlosschleifen
 const NAV_LOG_LAENGE = 12;
 
 /**
@@ -462,8 +458,7 @@ const NAV_LOG_LAENGE = 12;
  * Chrome normalisiert beim Navigieren: "https://example.com" im Lesezeichen
  * wird zu "https://example.com/", der Host wird kleingeschrieben, Umlaute
  * werden zu Punycode. Der rohe Stringvergleich gegen die gespeicherte Adresse
- * geht deshalb ins Leere — das war der Grund, warum der Abfang trotz erfüllter
- * Voraussetzungen nichts tat.
+ * geht deshalb ins Leere.
  */
 function canonicalUrl(raw) {
     try {
@@ -492,20 +487,6 @@ async function protokolliere(eintrag) {
         await chrome.storage.session.set({ navLog: navLog.slice(0, NAV_LOG_LAENGE) });
     } catch (e) {
         // Protokoll ist Diagnose, kein Zweck an sich
-    }
-}
-
-// > 1 heißt: im Tab stand vorher schon etwas. null = nicht messbar (fehlende
-// Berechtigung, chrome://-Seite, Tab schon weg) — dann fassen wir nichts an.
-async function tabHasHistory(tabId) {
-    try {
-        const [res] = await chrome.scripting.executeScript({
-            target: { tabId },
-            func: () => history.length,
-        });
-        return typeof res?.result === 'number' ? res.result > 1 : null;
-    } catch (e) {
-        return null;
     }
 }
 
@@ -545,8 +526,7 @@ async function handleBookmarkNavigation(details) {
     if (start && start.url !== details.url && Date.now() - start.zeit < 60000) {
         kandidaten.push(start.url);
     }
-    const treffer = kandidaten.find((u) => mirrorUrls.includes(canonicalUrl(u)));
-    const imSpiegel = !!treffer;
+    const imSpiegel = kandidaten.some((u) => mirrorUrls.includes(canonicalUrl(u)));
 
     // Normales Surfen interessiert hier nicht — protokolliert und geprüft wird
     // nur, was nach einem Lesezeichen aussieht oder aus dem Spiegel stammt.
@@ -554,13 +534,6 @@ async function handleBookmarkNavigation(details) {
 
     const notiz = { url: details.url, typ: details.transitionType, imSpiegel };
     if (start && start.url !== details.url) notiz.startUrl = start.url;
-
-    // Den Tab, den wir gerade selbst geöffnet haben, nicht erneut abfangen
-    const opened = openedByUs.get(details.url);
-    if (opened && Date.now() - opened < 3000) {
-        openedByUs.delete(details.url);
-        return;
-    }
 
     if (!istLesezeichen) {
         await protokolliere({ ...notiz, ergebnis: `kein Lesezeichen-Klick (${details.transitionType})` });
@@ -580,27 +553,16 @@ async function handleBookmarkNavigation(details) {
         return;
     }
 
-    const verlauf = await tabHasHistory(details.tabId);
-    if (verlauf !== true) {
-        await protokolliere({
-            ...notiz,
-            ergebnis: verlauf === false ? 'leerer Tab — bleibt absichtlich hier' : 'Verlauf nicht messbar',
-        });
-        return;
-    }
-
     try {
         const tab = await chrome.tabs.get(details.tabId);
-        openedByUs.set(details.url, Date.now());
-        await chrome.tabs.create({
-            url: details.url,
-            active: true,
-            index: tab.index + 1,
-            openerTabId: details.tabId,
-            windowId: tab.windowId,
-        });
-        await chrome.tabs.goBack(details.tabId);
-        await protokolliere({ ...notiz, ergebnis: '✓ in neuem Tab geöffnet' });
+        if (tab.active) {
+            // Linksklick: Chrome hat im selben (aktiven) Tab geöffnet. Das
+            // bleibt bewusst, wie es ist — umgeleitet wird nur der Mittelklick.
+            await protokolliere({ ...notiz, ergebnis: 'Linksklick — bleibt im selben Tab' });
+            return;
+        }
+        await chrome.tabs.update(details.tabId, { active: true });
+        await protokolliere({ ...notiz, ergebnis: '✓ Tab nach vorn geholt' });
     } catch (e) {
         await protokolliere({ ...notiz, ergebnis: 'Fehler: ' + e.message });
     }
