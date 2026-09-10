@@ -96,10 +96,14 @@ document.getElementById('save').addEventListener('click', async () => {
             show(`Gespeichert, aber die API meldet HTTP ${response.status} — Token prüfen.`, false);
             return;
         }
-        const data = await response.json();
-        // total = echte Gesamtzahl vom Server; items ist nur die erste Seite (100)
-        const count = typeof data.total === 'number' ? data.total : data.items.length;
-        show(`✓ Verbunden — ${count} Einträge gefunden. Sync läuft …`, true);
+        await response.json(); // muss JSON sein — sonst antwortet da nicht die API
+
+        // Hier stand bis 1.3.0 die Zahl aus `data.total`. Die zählt aber ALLE
+        // Datensätze des Kontos seit Beginn: Tombstones gelöschter Links und
+        // den Papierkorb eingeschlossen. Sie war deshalb um ein Vielfaches zu
+        // hoch und veränderte sich nie nach unten. Die einzige belastbare Zahl
+        // liefert der Sync selbst, wenn er durch ist — bis dahin keine.
+        show('✓ Verbunden. Sync läuft …', true);
 
         // Warten, bis der Spiegel steht: erst danach kennt die Mittelklick-Hilfe die
         // Adressen, und erst danach darf neu gestartet werden.
@@ -108,16 +112,17 @@ document.getElementById('save').addEventListener('click', async () => {
             show('Gespeichert, aber der Sync meldet: ' + (sync?.error || 'unbekannt'), false);
             return;
         }
+        const bilanz = `${sync.links} aktive Links, ${sync.lesezeichen} Lesezeichen`;
 
         // Der Listener für webNavigation entsteht beim Start des Service
         // Workers. Wurde die Berechtigung gerade erst erteilt, ist ein Neustart
         // der sichere Weg — sonst griffe der Abfang erst irgendwann später.
         if (openInNewTabInput.checked) {
-            show('✓ Gespeichert und synchronisiert. Erweiterung startet neu …', true);
+            show(`✓ Gespeichert und synchronisiert (${bilanz}). Erweiterung startet neu …`, true);
             setTimeout(() => chrome.runtime.reload(), 1200);
             return;
         }
-        show(`✓ Gespeichert und synchronisiert (${count} Einträge).`, true);
+        show(`✓ Gespeichert und synchronisiert — ${bilanz}.`, true);
     } catch (e) {
         show('Gespeichert, aber Verbindung fehlgeschlagen: ' + e.message, false);
     }
@@ -144,6 +149,25 @@ document.getElementById('diagnose').addEventListener('click', async () => {
     ];
     if (s.beispiel) {
         zeilen.push(`   Beispieladresse: ${kurz(s.beispiel)}`);
+    }
+
+    // Woraus der Spiegel entstanden ist. „Doppelte verworfen" ist der Beleg,
+    // dass die Seitenüberlappung greift: Ohne sie wären genau diese Einträge
+    // zwischen zwei Seiten verschwunden. „Lücken" darf nur dann über 0 stehen,
+    // wenn mehr als 100 Links in derselben Millisekunde geschrieben wurden —
+    // dann fehlt wirklich etwas.
+    const d = s.syncDetails;
+    if (d) {
+        zeilen.push('');
+        zeilen.push('Letzter Sync:');
+        zeilen.push(`   ${d.links} aktive Links → ${d.lesezeichen} Lesezeichen`);
+        zeilen.push(`   ${d.seiten} Seiten geladen, ${d.doppelte} Doppelte verworfen`);
+        if (d.uebersprungen > 0) {
+            zeilen.push(`   ${d.uebersprungen} Links ohne gültige Adresse übersprungen`);
+        }
+        if (d.luecken > 0) {
+            zeilen.push(`   ⚠ ${d.luecken} Lücke(n): über 100 Links teilen sich eine Millisekunde`);
+        }
     }
 
     zeilen.push('');

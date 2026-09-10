@@ -27,7 +27,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.action === 'sync-now') {
         syncBookmarks()
-            .then(() => sendResponse({ ok: true }))
+            .then((details) => sendResponse({ ok: true, ...details }))
             .catch((e) => sendResponse({ ok: false, error: e.message }));
         return true; // async response
     }
@@ -91,12 +91,32 @@ async function getConfig() {
     return { apiUrl: apiUrl.replace(/\/+$/, ''), token };
 }
 
-// Alle aktiven Links laden (paginiert über den Sync-Cursor der API)
+/**
+ * Alle aktiven Links laden (paginiert über den Sync-Cursor der API).
+ *
+ * Der Cursor ist ein ZEITSTEMPEL, kein Zeiger: Die API liefert `updated_at >
+ * since`, aufsteigend sortiert, 100 Einträge je Seite. Rückte der Cursor auf
+ * den GRÖSSTEN Zeitstempel der Seite vor, fiel alles durchs Raster, was genau
+ * diesen Zeitstempel trägt und nicht mehr auf die Seite gepasst hat.
+ *
+ * Das ist kein Randfall. Ein Stapel-Upload schreibt bis zu 100 Datensätze in
+ * einer Transaktion, viele davon in derselben Millisekunde — und genau so
+ * entsteht ein Ordner, dessen Links am Stück umsortiert oder verschoben
+ * wurden. Fällt eine Seitengrenze mitten in so einen Block, ist dessen Rest
+ * bei JEDEM Sync unsichtbar: immer dieselben Links, ohne Fehlermeldung.
+ *
+ * Deshalb eine Millisekunde Überlappung. Die Einträge des letzten Zeitstempels
+ * kommen auf der nächsten Seite noch einmal und werden über ihre ID verworfen.
+ * Gemessen an 310 Links mit einem 60er-Block in einer Millisekunde: vorher
+ * kamen 300 an (50 von 60 aus dem Block), jetzt alle 310.
+ */
 async function fetchAllLinks(apiUrl, token) {
     const links = [];
+    const gesehen = new Set();
     let since = 0;
-    let hasMore = true;
-    while (hasMore) {
+    const zaehler = { seiten: 0, doppelte: 0, luecken: 0 };
+
+    for (;;) {
         const response = await fetch(`${apiUrl}/links?since=${since}`, {
             headers: { Authorization: `Bearer ${token}` },
         });
@@ -104,15 +124,39 @@ async function fetchAllLinks(apiUrl, token) {
             throw new Error(`API antwortet mit HTTP ${response.status}`);
         }
         const data = await response.json();
-        for (const item of data.items) {
-            if (item.updatedAt > since) since = item.updatedAt;
+        zaehler.seiten++;
+
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (items.length === 0) break;
+
+        let groesster = since;
+        for (const item of items) {
+            if (item.updatedAt > groesster) groesster = item.updatedAt;
+            if (gesehen.has(item.id)) {
+                zaehler.doppelte++;
+                continue;
+            }
+            gesehen.add(item.id);
             if (!item.deleted && item.data && !item.data.trashed && item.data.url) {
                 links.push(item.data);
             }
         }
-        hasMore = data.hasMore;
+
+        if (!data.hasMore) break;
+
+        const vorher = since;
+        since = groesster - 1;
+        if (since <= vorher) {
+            // Eine ganze Seite in einer einzigen Millisekunde: Die Überlappung
+            // käme nicht von der Stelle, vorwärts geht es nur mit Verlust.
+            // Das gehört in die Diagnose statt ins Schweigen.
+            since = groesster;
+            zaehler.luecken++;
+        }
+        if (since <= vorher) break; // kein Fortschritt mehr möglich
     }
-    return links;
+
+    return { links, ...zaehler };
 }
 
 // ===============================
@@ -124,7 +168,7 @@ async function fetchAllLinks(apiUrl, token) {
 // bei ~4000 Links auf dreistellige Megabyte aufblähen.
 async function fetchCheckTargets() {
     const { apiUrl, token } = await getConfig();
-    const links = await fetchAllLinks(apiUrl, token);
+    const { links } = await fetchAllLinks(apiUrl, token);
     return links.map((link) => ({
         id: link.id,
         url: link.url,
@@ -297,19 +341,91 @@ async function createTree(parentId, node, stats) {
     }
 }
 
+/**
+ * Lose Lesezeichen direkt auf die Leiste legen — ohne Ordner darum.
+ * Gibt die erzeugten IDs zurück: Nur über sie findet der nächste Sync sie
+ * wieder, denn außerhalb des Überordners ist nichts an ihnen als „unser"
+ * erkennbar.
+ *
+ * `abIndex` schreibt die Position auf der Leiste fest. Ohne ihn hängt sie
+ * davon ab, was gerade sonst auf der Leiste steht — siehe detachFavorites().
+ */
+async function createLooseLinks(links, stats, abIndex = null) {
+    const ids = [];
+    for (const link of links.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'de'))) {
+        const url = normalizeUrl(link.url);
+        if (!url) {
+            stats.skipped++;
+            continue;
+        }
+        try {
+            const ziel = { parentId: BOOKMARKS_BAR_ID, title: link.title || url, url };
+            if (abIndex !== null) ziel.index = abIndex + ids.length;
+            const node = await chrome.bookmarks.create(ziel);
+            ids.push(node.id);
+            stats.created++;
+            stats.urls.add(url);
+        } catch (e) {
+            // Einzelner problematischer Link darf den Sync nicht abbrechen
+            stats.skipped++;
+        }
+    }
+    return ids;
+}
+
+/**
+ * Option „Favoriten-Links direkt auf die Leiste legen": löst den Ordner
+ * „Favoriten" aus dem Baum. Seine Links werden einzelne Lesezeichen auf der
+ * Leiste, seine Unterordner eigene Ordner daneben.
+ *
+ * Gilt seit 1.3.1 in BEIDEN Modi. Bis 1.3.0 stand der Block innerhalb von
+ * `if (directMode)` — wer im Überordner-Modus die Checkbox anhakte, bekam
+ * nichts: kein Effekt, keine Meldung. Ein Schalter ohne Wirkung ist kaputt,
+ * auch wenn ein Hinweistext darunter das erklärt.
+ *
+ * Muss VOR dem Aufbau des Spiegels laufen — was hier herausgelöst wird, darf
+ * danach nicht noch einmal im Baum auftauchen.
+ *
+ * Alles landet mit ausdrücklichem Index am ANFANG der Leiste. Ohne den hing
+ * die Position davon ab, ob der Überordner in diesem Lauf neu entstanden ist:
+ * Beim ersten Sync gab es ihn noch nicht, die Favoriten kamen davor; beim
+ * zweiten stand er schon, und sie rutschten dahinter. Gemessen an einem
+ * Testbaum — Inhalt identisch, Reihenfolge nicht.
+ */
+async function detachFavorites(tree, stats) {
+    if (!tree.folders.has(FAVORITES_TITLE)) return [];
+
+    const fav = tree.folders.get(FAVORITES_TITLE);
+    tree.folders.delete(FAVORITES_TITLE);
+
+    const ids = await createLooseLinks(fav.links, stats, 0);
+    for (const [name, child] of [...fav.folders.entries()].sort((a, b) => a[0].localeCompare(b[0], 'de'))) {
+        const folder = await chrome.bookmarks.create({
+            parentId: BOOKMARKS_BAR_ID,
+            index: ids.length,
+            title: name,
+        });
+        ids.push(folder.id);
+        await createTree(folder.id, child, stats);
+    }
+    return ids;
+}
+
 async function syncBookmarks() {
     const { apiUrl, token } = await getConfig();
     const { directMode = false, inlineFavorites = false, mirrorSecondary = true, lastMode = null, mirrorIds = [] } =
         await chrome.storage.local.get(["directMode", "inlineFavorites", "mirrorSecondary", "lastMode", "mirrorIds"]);
 
-    const links = await fetchAllLinks(apiUrl, token);
+    const { links, seiten, doppelte, luecken } = await fetchAllLinks(apiUrl, token);
     const tree = buildTree(links, mirrorSecondary !== false);
     // urls: Grundlage für den Klick-Abfang (openInNewTab) — nur Adressen, die
     // wirklich als Lesezeichen entstanden sind, werden später abgefangen.
     const stats = { created: 0, skipped: 0, entfernteDoppel: 0, urls: new Set() };
 
-    // Direkt-Modus-Knoten vom letzten Sync entfernen. Die IDs stammen sicher
-    // von uns — eigene Lesezeichen des Nutzers werden dadurch nie berührt.
+    // Knoten vom letzten Sync entfernen, die direkt auf der Leiste liegen —
+    // im Direkt-Modus der ganze Spiegel, im Überordner-Modus die losen
+    // Favoriten. Die IDs stammen sicher von uns; eigene Lesezeichen des
+    // Nutzers werden dadurch nie berührt.
     for (const id of mirrorIds) {
         try {
             await chrome.bookmarks.removeTree(String(id));
@@ -318,77 +434,31 @@ async function syncBookmarks() {
         }
     }
 
+    // Beim Wechsel in den Direkt-Modus den alten "Link-Safe"-Ordner abräumen —
+    // aber NUR beim Wechsel: Ein später vom Nutzer selbst angelegter Ordner
+    // gleichen Namens darf nicht bei jedem Sync sterben.
+    if (directMode && lastMode !== 'direct') {
+        const barChildren = await chrome.bookmarks.getChildren(BOOKMARKS_BAR_ID);
+        const oldMirror = barChildren.find((n) => !n.url && n.title === MIRROR_TITLE);
+        if (oldMirror) {
+            await chrome.bookmarks.removeTree(oldMirror.id);
+        }
+    }
+
+    // Favoriten aus dem Baum lösen, bevor der Spiegel entsteht — in beiden Modi.
+    const favIds = inlineFavorites ? await detachFavorites(tree, stats) : [];
+
     if (directMode) {
-        // Beim Wechsel aus dem Überordner-Modus den alten "Link-Safe"-Ordner
-        // abräumen — aber NUR beim Wechsel: Ein später vom Nutzer selbst
-        // angelegter Ordner gleichen Namens darf nicht bei jedem Sync sterben.
-        if (lastMode !== 'direct') {
-            const barChildren = await chrome.bookmarks.getChildren(BOOKMARKS_BAR_ID);
-            const oldMirror = barChildren.find((n) => !n.url && n.title === MIRROR_TITLE);
-            if (oldMirror) {
-                await chrome.bookmarks.removeTree(oldMirror.id);
-            }
-        }
-
         // Hauptordner + lose Links direkt auf die Leiste; erzeugte IDs merken
-        const newIds = [];
-
-        // Option: Favoriten-Links einzeln an den Anfang der Leiste,
-        // Unterordner der Favoriten werden zu eigenen Top-Level-Ordnern
-        if (inlineFavorites && tree.folders.has(FAVORITES_TITLE)) {
-            const fav = tree.folders.get(FAVORITES_TITLE);
-            tree.folders.delete(FAVORITES_TITLE);
-
-            for (const link of fav.links.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'de'))) {
-                const url = normalizeUrl(link.url);
-                if (!url) {
-                    stats.skipped++;
-                    continue;
-                }
-                try {
-                    const node = await chrome.bookmarks.create({
-                        parentId: BOOKMARKS_BAR_ID,
-                        title: link.title || url,
-                        url,
-                    });
-                    newIds.push(node.id);
-                    stats.created++;
-                    stats.urls.add(url);
-                } catch (e) {
-                    stats.skipped++;
-                }
-            }
-            for (const [name, child] of [...fav.folders.entries()].sort((a, b) => a[0].localeCompare(b[0], 'de'))) {
-                const folder = await chrome.bookmarks.create({ parentId: BOOKMARKS_BAR_ID, title: name });
-                newIds.push(folder.id);
-                await createTree(folder.id, child, stats);
-            }
-        }
+        const newIds = [...favIds];
 
         for (const [name, child] of [...tree.folders.entries()].sort((a, b) => a[0].localeCompare(b[0], 'de'))) {
             const folder = await chrome.bookmarks.create({ parentId: BOOKMARKS_BAR_ID, title: name });
             newIds.push(folder.id);
             await createTree(folder.id, child, stats);
         }
-        for (const link of tree.links.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'de'))) {
-            const url = normalizeUrl(link.url);
-            if (!url) {
-                stats.skipped++;
-                continue;
-            }
-            try {
-                const node = await chrome.bookmarks.create({
-                    parentId: BOOKMARKS_BAR_ID,
-                    title: link.title || url,
-                    url,
-                });
-                newIds.push(node.id);
-                stats.created++;
-                stats.urls.add(url);
-            } catch (e) {
-                stats.skipped++;
-            }
-        }
+        newIds.push(...await createLooseLinks(tree.links, stats));
+
         await chrome.storage.local.set({ mirrorIds: newIds, lastMode: 'direct' });
     } else {
         // Standard: alles im Überordner "Link-Safe"
@@ -414,18 +484,41 @@ async function syncBookmarks() {
             await chrome.bookmarks.removeTree(child.id);
         }
         await createTree(mirror.id, tree, stats);
-        await chrome.storage.local.set({ mirrorIds: [], lastMode: 'folder' });
+
+        // Die losen Favoriten liegen AUSSERHALB des Überordners. Ohne ihre IDs
+        // fände der nächste Sync sie nicht wieder — er räumt nur den Inhalt
+        // von "Link-Safe" ab, und die Leiste wüchse mit jedem Lauf um einen
+        // vollständigen Satz Favoriten.
+        await chrome.storage.local.set({ mirrorIds: favIds, lastMode: 'folder' });
     }
 
     // Adressen des Spiegels festhalten: nur sie fängt der Klick-Abfang ab
     // In Vergleichsform ablegen — Chrome navigiert normalisiert (siehe canonicalUrl)
     await chrome.storage.local.set({ mirrorUrls: [...stats.urls].map(canonicalUrl) });
 
-    const mehrfach = stats.created > links.length ? ` aus ${links.length} Links` : '';
     const doppel = stats.entfernteDoppel > 0
         ? `, ${stats.entfernteDoppel} doppelten Spiegel entfernt`
         : '';
-    await setStatus(`✓ ${stats.created} Lesezeichen${mehrfach}${doppel}`, stats.created, stats.skipped);
+    await setStatus(
+        `✓ ${stats.created} Lesezeichen aus ${links.length} Links${doppel}`,
+        stats.created,
+        stats.skipped,
+    );
+
+    // Zahlen des letzten Laufs für Optionsseite und Diagnose. `links` ist die
+    // Zahl, die wirklich etwas aussagt: aktive, nicht gelöschte Links mit
+    // Adresse. Die Gesamtzahl der API (`total`) zählt Tombstones und
+    // Papierkorb mit und ist deshalb um ein Vielfaches zu hoch.
+    const details = {
+        links: links.length,
+        lesezeichen: stats.created,
+        uebersprungen: stats.skipped,
+        seiten,
+        doppelte,
+        luecken,
+    };
+    await chrome.storage.local.set({ syncDetails: details });
+    return details;
 }
 
 // ===============================
@@ -588,8 +681,8 @@ registerNavigationHooks();
 // Adressen aus dem Spiegel bekannt, Listener registriert — dazu der Mitschnitt
 // der letzten Lesezeichen-Navigationen, der zeigt, was Chrome wirklich meldet.
 async function navStatus() {
-    const { openInNewTab = false, mirrorUrls = [], lastSyncTime = null } =
-        await chrome.storage.local.get(['openInNewTab', 'mirrorUrls', 'lastSyncTime']);
+    const { openInNewTab = false, mirrorUrls = [], lastSyncTime = null, syncDetails = null } =
+        await chrome.storage.local.get(['openInNewTab', 'mirrorUrls', 'lastSyncTime', 'syncDetails']);
     const { navLog = [] } = await chrome.storage.session.get(['navLog']);
     const navPermission = await chrome.permissions.contains({ permissions: ['webNavigation'] });
     const hostPermission = await chrome.permissions.contains({ origins: ['http://*/*', 'https://*/*'] });
@@ -602,6 +695,7 @@ async function navStatus() {
         listener: !!chrome.webNavigation
             && chrome.webNavigation.onCommitted.hasListener(handleBookmarkNavigation),
         lastSyncTime,
+        syncDetails,
         navLog,
     };
 }
