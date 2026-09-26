@@ -50,17 +50,39 @@ Im Popup:
   Meta-Beschreibung der Seite.
 - **„📝 Notiz schreiben"** öffnet direkt eine leere Notiz.
 
-Beides öffnet ein Link-Safe-Fenster mit vorbefülltem Formular — gespeichert wird
-mit einem Klick in der App. Das hat einen Grund: Der API-Token darf
-ausschließlich lesen, schreiben kann nur die angemeldete App. So bleiben
-Ordnerwahl, Pflichtfelder und der Sync genau dort, wo sie hingehören, und die
-Extension muss das Datenmodell nicht kennen.
+Beides öffnet ein kleines Fenster mit der **Speicherseite** von Link-Safe,
+vorbefüllt mit den Daten des Tabs. Sobald die Seite fertig ist (Ordner,
+Dublette und Anmeldung geprüft), passt sich das Fenster einmal genau auf das
+Formular ein — auch kleiner — und merkt sich diese Größe fürs nächste Mal.
+Danach wächst es nur noch mit, etwa bei „Neuer Ordner"; es schrumpft nie
+wieder und geht nie über den Bildschirm hinaus. Wer es von Hand kleiner
+zieht, behält seine Größe. Ohne gemerkte Größe startet es beim Link mit
+980 × 830, bei der Notiz mit 560 × 760:
 
-Das Fenster ist 1280 Pixel breit (gedeckelt auf den Bildschirm), weil die App
-unter 851 CSS-Pixeln auf die Handyansicht umschaltet — und Bildschirmpixel sind
-bei einer Windows-Skalierung von 125 % oder 150 % deutlich weniger CSS-Pixel.
-Wem das Fenster trotzdem nicht passt, hakt in den Optionen *„Speichern-Fenster
-als normalen Tab öffnen"* an; dann gilt einfach die Breite des Hauptfensters.
+- Titel, Adresse, Ordner und Notiz; Favicon und Vorschaubild der Seite
+  holt Link-Safe im Hintergrund und speichert sie mit
+- Der Ordner wird mit derselben Suche gewählt wie in der App; die zuletzt
+  benutzten Ordner stehen als Schnellwahl darunter. Ein neuer Ordner lässt
+  sich direkt anlegen, weitere Ablageorte kommen über „+ auch hier ablegen"
+  dazu
+- Links steht der Ordnerbaum wie in der Seitenleiste der App — zum
+  Stöbern, wenn einem der Name eines Ordners nicht einfällt. Klick auf einen
+  Ordner macht ihn zum Ablageort, ⊕ legt den Link zusätzlich dort ab
+- Ist der Link schon gespeichert, steht das sofort da, samt Ordner
+- Nach dem Speichern lädt die Seite sofort hoch und schließt sich; gelingt
+  das Hochladen nicht, bleibt sie offen und sagt es
+
+Gespeichert wird in der App, nicht von der Extension. Das hat einen Grund:
+Der API-Token darf ausschließlich lesen, schreiben kann nur die angemeldete
+App. So bleiben Ordnerwahl, Pflichtfelder und der Sync genau dort, wo sie
+hingehören, und die Extension muss das Datenmodell nicht kennen.
+
+**Braucht Link-Safe ab V2.31.0** — ältere Versionen haben keine
+Speicherseite. Bis 1.3.1 öffnete die Extension die ganze App mit
+aufgeklapptem Formular in einem 1280 Pixel breiten Fenster.
+
+Wer lieber im gewohnten Fenster arbeitet, hakt in den Optionen
+*„Speichern-Fenster als normalen Tab öffnen"* an.
 
 ## Mittelklick holt den neuen Tab nach vorn
 

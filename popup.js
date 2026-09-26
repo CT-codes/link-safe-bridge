@@ -25,9 +25,11 @@ async function refreshStatus() {
 // Der API-Token darf nur lesen (auth.php: Bearer gilt ausschließlich für GET),
 // schreiben kann allein die Cookie-Session der App. Statt dafür einen
 // Schreib-Token zu bauen, geht die Extension denselben Weg wie das Bookmarklet:
-// Sie öffnet die App mit vorbefülltem Formular. Damit gelten Ordnerwahl,
-// Pflichtfelder, ID-Vergabe und Sync unverändert — es gibt keine zweite Stelle,
-// die das Datenmodell kennen müsste.
+// Sie öffnet die Speicherseite der App (speichern.html, seit Link-Safe V2.31.0)
+// mit vorbefüllten Feldern. Die speichert über dieselben Module wie das
+// Formular der App — Ordnerwahl, Pflichtfelder, ID-Vergabe und Sync gelten
+// unverändert, und es gibt keine zweite Stelle, die das Datenmodell kennen
+// müsste.
 
 // Aus "https://host/pfad/api/index.php" wird "https://host/pfad/" — die App
 // liegt immer eine Ebene über ihrer API.
@@ -48,32 +50,58 @@ async function getAppBase() {
     }
 }
 
-// Die App schaltet unter 851 CSS-Pixeln auf die Handyansicht um
-// (style-bem.css: @media (min-width: 851px)). chrome.windows.create rechnet in
-// Bildschirmpixeln — bei einer Windows-Skalierung von 125 % sind 900 davon nur
-// 720 CSS-Pixel, und das Speichern-Formular kam im Handylayout hoch. Deshalb
-// großzügig: 1280 breit, gedeckelt auf den verfügbaren Bildschirm.
-const FENSTER_BREITE = 1280;
-const FENSTER_HOEHE = 900;
+// Bis 1.3.1 öffnete die Extension die ganze App, und das Fenster musste
+// 1280 Pixel breit sein, damit sie nicht in die Handyansicht rutschte. Die
+// Speicherseite ist für ein kleines Fenster gebaut. Die Seite passt es danach
+// selbst an: einmal genau aufs Formular, sobald sie fertig ist, und später wächst
+// es mit (background.js, growSaveWindow). Die eingepasste Größe merkt sich die
+// Bridge je Fensterart (saveWindowSizes) und öffnet das nächste Fenster gleich
+// so — meist springt dann nichts mehr. Ohne gemerkte Größe startet es beim
+// Link mit 980 × 830 (links der Ordnerbaum, rechts das Formular), bei der
+// Notiz mit 560 × 760; dieselben Startgrößen nutzen die Bookmarklets der App.
+// Alles gedeckelt auf den verfügbaren Bildschirm.
+const FENSTER_LINK = { art: 'link', breite: 980, hoehe: 830 };
+const FENSTER_NOTIZ = { art: 'note', breite: 560, hoehe: 760 };
 
-async function openApp(url) {
-    const { saveInTab = false } = await chrome.storage.local.get(['saveInTab']);
+async function openSavePage(url, fenster) {
+    const { saveInTab = false, saveWindowSizes = {} } =
+        await chrome.storage.local.get(['saveInTab', 'saveWindowSizes']);
     if (saveInTab) {
+        // Ein Tab im normalen Browserfenster wird nie umgebaut
         await chrome.tabs.create({ url, active: true });
         window.close();
         return;
     }
 
-    const breite = Math.min(FENSTER_BREITE, Math.max(900, screen.availWidth - 80));
-    const hoehe = Math.min(FENSTER_HOEHE, Math.max(600, screen.availHeight - 80));
-    await chrome.windows.create({
+    const gemerkt = saveWindowSizes[fenster.art];
+    const gueltig = (wert) => Number.isFinite(wert) && wert >= 300;
+    const start = gemerkt && gueltig(gemerkt.width) && gueltig(gemerkt.height)
+        ? { breite: gemerkt.width, hoehe: gemerkt.height }
+        : fenster;
+
+    const breite = Math.min(start.breite, screen.availWidth - 40);
+    const hoehe = Math.min(start.hoehe, Math.max(500, screen.availHeight - 40));
+    const win = await chrome.windows.create({
         url,
         type: 'popup',
         width: Math.round(breite),
         height: Math.round(hoehe),
-        left: Math.round((screen.availWidth - breite) / 2),
-        top: Math.round((screen.availHeight - hoehe) / 2),
+        left: Math.round(screen.availLeft + (screen.availWidth - breite) / 2),
+        top: Math.round(screen.availTop + (screen.availHeight - hoehe) / 2),
     });
+
+    // Das Popup hier schließt sich gleich — das Mitwachsen übernimmt deshalb
+    // der Hintergrund, und nur für genau dieses Fenster.
+    const tabId = win?.tabs?.[0]?.id;
+    if (tabId != null) {
+        try {
+            await chrome.runtime.sendMessage({
+                action: 'watch-save-window', windowId: win.id, tabId, art: fenster.art,
+            });
+        } catch (e) {
+            // Ohne Hintergrund bleibt es bei der Startgröße — gespeichert wird trotzdem
+        }
+    }
     window.close();
 }
 
@@ -117,8 +145,10 @@ document.getElementById('save-page').addEventListener('click', async () => {
         title: tab.title || '',
         url: tab.url,
         description: await pageDescription(tab.id),
+        // Sagt der Seite, dass die Bridge das Fenster vergrößert (nicht sie selbst)
+        via: 'bridge',
     });
-    openApp(`${appBase}?${params.toString()}`);
+    openSavePage(`${appBase}speichern.html?${params.toString()}`, FENSTER_LINK);
 });
 
 document.getElementById('save-note').addEventListener('click', async () => {
@@ -127,7 +157,7 @@ document.getElementById('save-note').addEventListener('click', async () => {
         info.textContent = 'Erst die API-URL in den Optionen eintragen.';
         return;
     }
-    openApp(`${appBase}?action=import&source=bookmarklet-note`);
+    openSavePage(`${appBase}speichern.html?action=import&source=bookmarklet-note&via=bridge`, FENSTER_NOTIZ);
 });
 
 syncBtn.addEventListener('click', async () => {

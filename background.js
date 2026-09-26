@@ -66,15 +66,213 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             .catch((e) => sendResponse({ ok: false, error: e.message }));
         return true;
     }
+
+    // Speicherfenster: popup.js meldet das eben geöffnete Fenster an …
+    if (msg?.action === 'watch-save-window') {
+        watchSaveWindow(msg.tabId, msg.windowId, msg.art)
+            .then(() => sendResponse({ ok: true }))
+            .catch((e) => sendResponse({ ok: false, error: e.message }));
+        return true;
+    }
+
+    // … und das Skript darin meldet, wie viel Platz der Seite fehlt
+    if (msg?.action === 'grow-save-window') {
+        growSaveWindow(sender, msg)
+            .then((result) => sendResponse({ ok: true, ...result }))
+            .catch((e) => sendResponse({ ok: false, error: e.message }));
+        return true;
+    }
 });
 
-// Wartet ein Ergebnis auf Zustellung, sobald ein Tab der App fertig lädt?
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     if (changeInfo.status !== 'complete') return;
+
+    // Wartet ein Ergebnis auf Zustellung, sobald ein Tab der App fertig lädt?
     chrome.storage.local.get(['pendingResults']).then(({ pendingResults }) => {
         if (pendingResults) flushPendingResults().catch(() => { /* nächster Tab-Load probiert erneut */ });
     });
+
+    // Ist es ein Speicherfenster der Bridge? Dann das Mitwachsen einrichten.
+    savedWindows().then((fenster) => {
+        if (fenster[tabId] != null) injectSaveWindowRelay(tabId).catch(() => { /* nächster Load */ });
+    });
 });
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+    savedWindows().then((fenster) => {
+        if (fenster[tabId] == null) return;
+        delete fenster[tabId];
+        return chrome.storage.session.set({ saveWindows: fenster });
+    }).catch(() => { /* verwaist höchstens bis zum Browser-Neustart */ });
+});
+
+// ===============================
+// Speicherfenster passt sich seinem Inhalt an
+// ===============================
+//
+// Die Speicherseite der App öffnet in einer Startgröße (popup.js) und meldet
+// danach selbst, was ihr fehlt oder zu viel ist — nur sie kennt ihr Layout:
+// <html data-save-window-need="fit|grow Breite Höhe"> in CSS-Pixeln, siehe
+// FENSTERGRÖSSE in speichern.js. Umbauen darf sich ein Fenster aus
+// chrome.windows.create dort nicht selbst (window.resizeTo gilt nur für
+// window.open-Fenster), die Extension darf es. Ein kleines Skript im Fenster
+// (injectSaveWindowRelay) reicht den Wert deshalb hierher weiter.
+//
+//   „fit"  — einmal genau einpassen, sobald die Seite fertig ist; darf auch
+//            verkleinern. Das Ergebnis wird je Fensterart gemerkt
+//            (saveWindowSizes), popup.js öffnet das nächste Fenster so.
+//   „grow" — danach nur noch wachsen, nie schrumpfen.
+//
+// Umgebaut werden ausschließlich Fenster, die popup.js selbst geöffnet und
+// angemeldet hat — nie ein Tab im normalen Browserfenster. Gedeckelt auf den
+// Bildschirm, zur Mitte hin (das Fenster wurde mittig geöffnet).
+
+// Kleiner wird ein Fenster auch beim Einpassen nicht — Schutz gegen einen
+// Messfehler, der es zu einem Strich zusammenfalten würde.
+const SAVE_WINDOW_MIN = { width: 360, height: 300 };
+
+// tabId → { windowId, art }; in storage.session, weil der Service Worker
+// zwischen zwei Meldungen beendet werden kann.
+async function savedWindows() {
+    const { saveWindows = {} } = await chrome.storage.session.get(['saveWindows']);
+    return saveWindows;
+}
+
+async function watchSaveWindow(tabId, windowId, art) {
+    if (!Number.isInteger(tabId) || !Number.isInteger(windowId)) {
+        throw new Error('Kein gültiges Fenster übergeben.');
+    }
+    const fenster = await savedWindows();
+    fenster[tabId] = { windowId, art: art === 'note' ? 'note' : 'link' };
+    await chrome.storage.session.set({ saveWindows: fenster });
+
+    // Ist die Seite schon fertig, bevor diese Meldung ankam, käme kein
+    // onUpdated mehr — dann gleich hier einrichten.
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.status === 'complete') await injectSaveWindowRelay(tabId);
+}
+
+async function injectSaveWindowRelay(tabId) {
+    await chrome.scripting.executeScript({
+        target: { tabId },
+        func: relaySaveWindowNeed,
+    });
+}
+
+// Läuft im Speicherfenster (isolierte Welt) — vollständig eigenständig, ohne
+// Closures. Beobachtet das Attribut und meldet jeden neuen Bedarf einmal.
+function relaySaveWindowNeed() {
+    if (window.__linkSafeSaveWindowRelay) return;
+    window.__linkSafeSaveWindowRelay = true;
+
+    const root = document.documentElement;
+    let gemeldet = '';
+    const pruefen = () => {
+        const bedarf = root.dataset.saveWindowNeed || '';
+        if (!bedarf || bedarf === gemeldet) return;
+        gemeldet = bedarf;
+        const teile = bedarf.split(' ');
+        const modus = teile[0] === 'fit' ? 'fit' : 'grow';
+        if (teile[0] === 'fit' || teile[0] === 'grow') teile.shift();
+        const [extraW, extraH] = teile.map(Number);
+        if (!Number.isFinite(extraW) || !Number.isFinite(extraH)) return;
+        if (modus === 'grow' && !(extraW > 0) && !(extraH > 0)) return;
+        if (modus === 'fit' && !extraW && !extraH) return;
+        chrome.runtime.sendMessage({
+            action: 'grow-save-window',
+            modus,
+            extraW,
+            extraH,
+            bildschirm: {
+                left: screen.availLeft,
+                top: screen.availTop,
+                width: screen.availWidth,
+                height: screen.availHeight,
+            },
+        }).catch(() => { /* Hintergrund neu gestartet — nächster Bedarf probiert erneut */ });
+    };
+    new MutationObserver(pruefen).observe(root, {
+        attributes: true,
+        attributeFilter: ['data-save-window-need'],
+    });
+    pruefen();
+}
+
+// Nacheinander statt gleichzeitig: Zwei Meldungen kurz hintereinander würden
+// sonst beide von derselben alten Größe aus rechnen und doppelt wachsen.
+let growQueue = Promise.resolve();
+
+function growSaveWindow(sender, msg) {
+    const run = growQueue.then(() => growSaveWindowNow(sender, msg));
+    growQueue = run.catch(() => { /* Kette nicht abreißen lassen */ });
+    return run;
+}
+
+async function growSaveWindowNow(sender, msg) {
+    const tabId = sender?.tab?.id;
+    const fenster = await savedWindows();
+    const eintrag = fenster[tabId];
+    const windowId = eintrag?.windowId;
+    if (windowId == null || sender.tab.windowId !== windowId) {
+        return { gewachsen: false, grund: 'kein Speicherfenster der Bridge' };
+    }
+
+    const einpassen = msg.modus === 'fit';
+    const zahl = (wert) => (Number.isFinite(Number(wert)) ? Number(wert) : 0);
+    const grenze = (wert) => Math.min(Math.max(einpassen ? -2000 : 0, zahl(wert)), 2000);
+    const extraW = grenze(msg.extraW);
+    const extraH = grenze(msg.extraH);
+    if (!extraW && !extraH) return { gewachsen: false };
+
+    // Die Seite misst in CSS-Pixeln, das Fenster zählt in Bildschirmpunkten:
+    // bei 110 % Zoom braucht jeder CSS-Pixel 1,1 Punkte. Ohne Zoomwert passt
+    // es nicht ganz — die Seite meldet den Rest dann im nächsten Durchgang.
+    // Math.ceil rundet auch beim Verkleinern zur Null hin: lieber ein Punkt
+    // zu viel als ein Scrollbalken.
+    let zoom = 1;
+    try {
+        zoom = (await chrome.tabs.getZoom(tabId)) || 1;
+    } catch (e) {
+        zoom = 1;
+    }
+
+    const win = await chrome.windows.get(windowId);
+    const s = msg.bildschirm || {};
+    const bLeft = zahl(s.left);
+    const bTop = zahl(s.top);
+    const bWidth = zahl(s.width) || win.width;
+    const bHeight = zahl(s.height) || win.height;
+
+    // Dieselbe Deckelung wie beim Öffnen in popup.js. Beim Wachsen nie unter
+    // die jetzige Größe, beim Einpassen nie unter das Minimum.
+    const maxWidth = Math.max(win.width, bWidth - 40);
+    const maxHeight = Math.max(win.height, bHeight - 40);
+    const minWidth = einpassen ? Math.min(win.width, SAVE_WINDOW_MIN.width) : win.width;
+    const minHeight = einpassen ? Math.min(win.height, SAVE_WINDOW_MIN.height) : win.height;
+    const width = Math.min(Math.max(win.width + Math.ceil(extraW * zoom), minWidth), maxWidth);
+    const height = Math.min(Math.max(win.height + Math.ceil(extraH * zoom), minHeight), maxHeight);
+
+    if (width !== win.width || height !== win.height) {
+        // Zur Mitte hin, aber auf dem Bildschirm bleiben
+        let left = win.left - Math.round((width - win.width) / 2);
+        let top = win.top - Math.round((height - win.height) / 2);
+        left = Math.min(Math.max(left, bLeft), bLeft + bWidth - width);
+        top = Math.min(Math.max(top, bTop), bTop + bHeight - height);
+        await chrome.windows.update(windowId, { width, height, left, top });
+    }
+
+    // Die eingepasste Größe ist die Startgröße fürs nächste Mal
+    if (einpassen) {
+        const { saveWindowSizes = {} } = await chrome.storage.local.get(['saveWindowSizes']);
+        saveWindowSizes[eintrag.art] = { width, height };
+        await chrome.storage.local.set({ saveWindowSizes });
+    }
+
+    if (width === win.width && height === win.height) {
+        return { gewachsen: false, grund: einpassen ? 'passt schon' : 'Bildschirmrand' };
+    }
+    return { gewachsen: true, width, height, zoom };
+}
 
 async function setStatus(text, count = null, skipped = null) {
     const status = { lastStatus: text, lastSyncTime: Date.now() };
