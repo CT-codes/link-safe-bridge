@@ -10,6 +10,12 @@
         }
         h1 { font-size: 1rem; margin: 0 0 10px; }
         h1 em { color: #4f8fd0; font-style: normal; }
+        /* #28a745 = --color-success-text der App, auf #16181d 5,67 : 1 */
+        #saved { font-size: 0.82rem; line-height: 1.4; overflow-wrap: anywhere; }
+        #saved p { margin: 0; color: #28a745; }
+        #saved ul { margin: 2px 0 0; padding: 0 0 0 1.1em; list-style: none; }
+        /* Hängender Einzug: Bricht ein langer Pfad um, sieht man, wo der nächste Ordner anfängt */
+        #saved li { padding-left: 0.8em; text-indent: -0.8em; }
         #info { font-size: 0.82rem; color: #9a9890; min-height: 3.6em; white-space: pre-line; line-height: 1.5; }
         button {
             width: 100%; margin-top: 12px; padding: 9px 0;
@@ -24,6 +30,7 @@
 </head>
 <body>
     <h1>Link-<em>Safe</em> Bridge</h1>
+    <div id="saved" hidden></div>
     <button id="save-page">➕ Diese Seite speichern</button>
     <button id="save-note" class="secondary">📝 Notiz schreiben</button>
     <hr>

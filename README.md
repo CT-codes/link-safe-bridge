@@ -1,10 +1,12 @@
 # Link-Safe Bridge (Chrome/Edge-Extension)
 
-Die Browser-Erweiterung zu [Link-Safe](https://link-safe.taenzer.net). Sie kann dreierlei:
+Die Browser-Erweiterung zu [Link-Safe](https://link-safe.taenzer.net). Sie kann viererlei:
 
 - **Spiegeln:** deine Link-Safe-Sammlung als Ordner in der Lesezeichenleiste —
   einweg (Link-Safe → Browser), automatisch alle 15 Minuten
 - **Speichern:** die aktuelle Seite oder eine schnelle Notiz nach Link-Safe geben
+- **Erkennen:** die Kette im Symbol wird grün, wenn die offene Seite schon in
+  Link-Safe liegt
 - **Prüfen:** die Sammlung auf tote Links testen (Link-Rot-Wächter)
 
 Eigene Lesezeichen außerhalb des gespiegelten Ordners werden nie angefasst.
@@ -83,6 +85,34 @@ aufgeklapptem Formular in einem 1280 Pixel breiten Fenster.
 
 Wer lieber im gewohnten Fenster arbeitet, hakt in den Optionen
 *„Speichern-Fenster als normalen Tab öffnen"* an.
+
+## Grüne Kette im Symbol: Seite schon gespeichert
+
+Das Symbol der Extension ist eine dünne Kette auf fast schwarzem Grund. Liegt
+die Seite im offenen Tab schon in Link-Safe, wird die Kette **grün** statt
+blau. Weil das Symbol den Zustand nur über die Farbe zeigt, sagt es der
+Tooltip in Worten und nennt die Ordner dazu. Das Popup zeigt oben
+„✓ Schon gespeichert in:" mit jedem Ordner in einer eigenen Zeile, und der
+Knopf heißt dann **„➕ Trotzdem speichern"**.
+
+- Verglichen wird wie auf der Speicherseite: ohne `https://`, ohne `www.`,
+  ohne Schrägstrich am Ende und ohne Tracking-Parameter (`utm_…`, `fbclid` …)
+- Der Abgleich läuft lokal gegen die Liste, die der Sync ohnehin lädt —
+  keine Adresse verlässt dafür den Browser
+- Nach dem Speichern über die Extension wird die Kette grün, sobald sich die
+  Speicherseite schließt. Was in der App oder auf einem anderen Gerät
+  gespeichert, verschoben oder gelöscht wird, zeigt das Symbol mit dem
+  nächsten Sync (alle 15 Minuten, oder sofort über „Jetzt synchronisieren")
+- Nur für Links auf http/https-Seiten; Notizen und der Papierkorb zählen
+  nicht mit. Leitet eine Seite auf eine andere Adresse um, ist die Kette nur
+  an der Adresse grün, die gespeichert ist
+- Die Farben heben sich auf hellen wie dunklen Browserleisten ab: blaue
+  Kette `#4f8fd0` und grüne `#4cc764` auf dem Grund `#16181d` mit 5,2 : 1
+  bzw. 8,2 : 1
+
+Dafür braucht die Extension seit 1.5.0 die Berechtigung `tabs`: Mit ihr
+erfährt sie die Adresse eines Tabs, ohne dass man vorher aufs Symbol klickt.
+Die Adressen bleiben in der Extension.
 
 ## Mittelklick holt den neuen Tab nach vorn
 
@@ -184,3 +214,40 @@ werden aufgeräumt.
 - Gespeichert wird immer über ein Fenster der App, nie direkt aus dem Popup
 - Innerhalb eines Ordners stehen die Lesezeichen alphabetisch, nicht in der
   eigenen Reihenfolge aus der App
+
+## Symbol und Lizenz
+
+Die Kette im Symbol ist das Symbol „link" aus
+[Feather Icons](https://github.com/feathericons/feather), für die Extension
+auf eine dunkle Kachel gesetzt und eingefärbt. Feather Icons steht unter der
+MIT-Lizenz; sie erlaubt die Nutzung, wenn der folgende Hinweis mitgeliefert
+wird.
+
+<details>
+<summary>MIT-Lizenz von Feather Icons</summary>
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2013-2023 Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+</details>

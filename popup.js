@@ -67,8 +67,19 @@ async function openSavePage(url, fenster) {
     const { saveInTab = false, saveWindowSizes = {} } =
         await chrome.storage.local.get(['saveInTab', 'saveWindowSizes']);
     if (saveInTab) {
-        // Ein Tab im normalen Browserfenster wird nie umgebaut
-        await chrome.tabs.create({ url, active: true });
+        // Ein Tab im normalen Browserfenster wird nie umgebaut. Erst im
+        // Hintergrund öffnen und anmelden, dann nach vorn holen — mit dem
+        // Tabwechsel schließt sich dieses Popup, die Anmeldung wäre sonst
+        // womöglich nicht mehr unterwegs.
+        const tab = await chrome.tabs.create({ url, active: false });
+        if (fenster.art === 'link' && tab?.id != null) {
+            try {
+                await chrome.runtime.sendMessage({ action: 'watch-save-tab', tabId: tab.id });
+            } catch (e) {
+                // Dann wird die Kette im Symbol erst mit dem nächsten Sync grün
+            }
+        }
+        await chrome.tabs.update(tab.id, { active: true });
         window.close();
         return;
     }
@@ -124,6 +135,44 @@ async function pageDescription(tabId) {
     } catch (e) {
         return '';
     }
+}
+
+// Liegt die Seite im Tab schon in Link-Safe? Dasselbe wie die grüne Kette im Symbol
+// (background.js, Gespeichert-Anzeige), hier in Worten — und der Knopf sagt,
+// was er dann tut. Den Stand kennt nur der Hintergrund; antwortet er nicht,
+// bleibt das Popup wie bisher.
+async function refreshSaved() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url) return;
+    let antwort;
+    try {
+        antwort = await chrome.runtime.sendMessage({ action: 'saved-info', url: tab.url });
+    } catch (e) {
+        return;
+    }
+    if (!antwort?.ok || !antwort.gespeichert) return;
+
+    // Jeder Ordner in eine eigene Zeile — als Liste, dann sagt ein
+    // Screenreader auch, wie viele es sind
+    const zeile = document.createElement('p');
+    const haken = document.createElement('span');
+    haken.setAttribute('aria-hidden', 'true');
+    haken.textContent = '✓ ';
+    zeile.append(haken, 'Schon gespeichert in:');
+    const liste = document.createElement('ul');
+    const ordner = Array.isArray(antwort.ordner) && antwort.ordner.length ? antwort.ordner : ['Ohne Ordner'];
+    for (const name of ordner) {
+        const eintrag = document.createElement('li');
+        eintrag.textContent = name;
+        liste.append(eintrag);
+    }
+    const hinweis = document.getElementById('saved');
+    hinweis.replaceChildren(zeile, liste);
+    hinweis.hidden = false;
+    const knopf = document.getElementById('save-page');
+    knopf.textContent = '➕ Trotzdem speichern';
+    // Wer den Knopf mit dem Screenreader ansteuert, hört das Wo gleich mit
+    knopf.setAttribute('aria-describedby', 'saved');
 }
 
 document.getElementById('save-page').addEventListener('click', async () => {
@@ -186,3 +235,4 @@ document.getElementById('openOptions').addEventListener('click', (e) => {
 });
 
 refreshStatus();
+refreshSaved();

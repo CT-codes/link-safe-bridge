@@ -12,10 +12,12 @@ const BOOKMARKS_BAR_ID = '1'; // Lesezeichenleiste in Chromium
 
 chrome.runtime.onInstalled.addListener(() => {
     chrome.alarms.create(SYNC_ALARM, { periodInMinutes: 15 });
+    richteAnzeigeEin().catch(() => { /* ohne Optionen noch nichts anzuzeigen */ });
 });
 
 chrome.runtime.onStartup.addListener(() => {
     chrome.alarms.create(SYNC_ALARM, { periodInMinutes: 15 });
+    richteAnzeigeEin().catch(() => { /* ohne Optionen noch nichts anzuzeigen */ });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -82,6 +84,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             .catch((e) => sendResponse({ ok: false, error: e.message }));
         return true;
     }
+
+    // Speicherseite im normalen Tab: nur fürs Nachladen der Anzeige merken
+    if (msg?.action === 'watch-save-tab') {
+        watchSaveTab(msg.tabId)
+            .then(() => sendResponse({ ok: true }))
+            .catch((e) => sendResponse({ ok: false, error: e.message }));
+        return true;
+    }
+
+    // Popup fragt, ob die Seite im Tab schon gespeichert ist, und wo — die
+    // Ordner einzeln, es setzt jeden in eine eigene Zeile. Leer heißt „Ohne Ordner".
+    if (msg?.action === 'saved-info') {
+        gespeichertIn(msg.url)
+            .then((orte) => sendResponse({ ok: true, gespeichert: Boolean(orte), ordner: orte ? orte.filter(Boolean) : [] }))
+            .catch((e) => sendResponse({ ok: false, error: e.message }));
+        return true;
+    }
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -101,6 +120,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
     savedWindows().then((fenster) => {
         if (fenster[tabId] == null) return;
+        // Ein Link-Fenster schließt sich erst, wenn der Server den Link hat —
+        // jetzt kann die Kette im Symbol grün werden (Gespeichert-Anzeige)
+        if (fenster[tabId].art === 'link') nachSpeichern();
         delete fenster[tabId];
         return chrome.storage.session.set({ saveWindows: fenster });
     }).catch(() => { /* verwaist höchstens bis zum Browser-Neustart */ });
@@ -307,11 +329,19 @@ async function getConfig() {
  * kommen auf der nächsten Seite noch einmal und werden über ihre ID verworfen.
  * Gemessen an 310 Links mit einem 60er-Block in einer Millisekunde: vorher
  * kamen 300 an (50 von 60 aus dem Block), jetzt alle 310.
+ *
+ * Mit `ab` holt sie nur, was sich seit diesem Zeitstempel geändert hat — so
+ * zieht die Gespeichert-Anzeige nach dem Speichern nach, ohne alles zu laden.
+ * Für sie liefert sie außerdem `adressen` (ID → Vergleichsform und Ordner,
+ * null für Gelöschtes und Papierkorb) und `bis`, den jüngsten gesehenen
+ * Zeitstempel. `updated_at` setzt der Server, nicht das Gerät (api/items.php).
  */
-async function fetchAllLinks(apiUrl, token) {
+async function fetchAllLinks(apiUrl, token, ab = 0) {
     const links = [];
+    const adressen = new Map();
     const gesehen = new Set();
-    let since = 0;
+    let since = ab;
+    let bis = ab;
     const zaehler = { seiten: 0, doppelte: 0, luecken: 0 };
 
     for (;;) {
@@ -337,8 +367,12 @@ async function fetchAllLinks(apiUrl, token) {
             gesehen.add(item.id);
             if (!item.deleted && item.data && !item.data.trashed && item.data.url) {
                 links.push(item.data);
+                adressen.set(item.id, [normalizeUrlForCompare(item.data.url), placesOf(item.data)]);
+            } else {
+                adressen.set(item.id, null);
             }
         }
+        if (groesster > bis) bis = groesster;
 
         if (!data.hasMore) break;
 
@@ -354,7 +388,7 @@ async function fetchAllLinks(apiUrl, token) {
         if (since <= vorher) break; // kein Fortschritt mehr möglich
     }
 
-    return { links, ...zaehler };
+    return { links, adressen, bis, ...zaehler };
 }
 
 // ===============================
@@ -614,7 +648,15 @@ async function syncBookmarks() {
     const { directMode = false, inlineFavorites = false, mirrorSecondary = true, lastMode = null, mirrorIds = [] } =
         await chrome.storage.local.get(["directMode", "inlineFavorites", "mirrorSecondary", "lastMode", "mirrorIds"]);
 
-    const { links, seiten, doppelte, luecken } = await fetchAllLinks(apiUrl, token);
+    const { links, adressen, bis, seiten, doppelte, luecken } = await fetchAllLinks(apiUrl, token);
+
+    // Gleich hier und nicht erst nach dem Umbau der Leiste: Je länger der
+    // Abstand zum Laden, desto eher überschreibt dieser Stand eine
+    // Nachlieferung, die inzwischen neuer ist. Ohne await — der Umbau muss
+    // nicht auf die Anzeige warten.
+    uebernehmeAdressen(adressen, bis)
+        .catch(() => { /* Anzeige bleibt beim alten Stand, der Spiegel geht vor */ });
+
     const tree = buildTree(links, mirrorSecondary !== false);
     // urls: Grundlage für den Klick-Abfang (openInNewTab) — nur Adressen, die
     // wirklich als Lesezeichen entstanden sind, werden später abgefangen.
@@ -718,6 +760,228 @@ async function syncBookmarks() {
     await chrome.storage.local.set({ syncDetails: details });
     return details;
 }
+
+// ===============================
+// GESPEICHERT-ANZEIGE AM SYMBOL
+// ===============================
+//
+// Liegt die Seite im Tab schon in Link-Safe, wird die Kette im Symbol grün
+// statt blau. Verglichen wird lokal gegen die Adressen, die der Sync ohnehin
+// lädt; keine Adresse verlässt dafür den Browser. Weil das Symbol den Zustand
+// nur über die Farbe zeigt, sagt es der Tooltip in Worten, mit den Ordnern
+// dazu. Dasselbe zeigt das Popup über dem Speichern-Knopf ('saved-info').
+//
+// Bis zum Test von 1.5.0 war es ein grünes ✓-Badge. Das verdeckte die untere
+// Ecke des Symbols, das auf dunklen Leisten ohnehin kaum zu sehen war (dünne
+// Kette in #0056b3: 2,29 : 1 auf #202124). Seitdem liegt die Kette auf einer
+// fast schwarzen Kachel und wechselt die Farbe (icon-*.png, icon-gespeichert-*.png).
+//
+// Die Liste liegt in storage.local — savedLinks: ID → [Vergleichsform,
+// Ordner], savedLinksBis: jüngster Zeitstempel darin. Aktuell hält sie sich
+// auf zwei Wegen:
+//   - Jeder Sync baut sie neu (alle 15 Minuten und auf Knopfdruck).
+//   - Schließt sich eine Speicherseite, die die Bridge geöffnet hat, kommt
+//     nur nach, was sich seit savedLinksBis geändert hat. Die Seite geht erst
+//     zu, wenn der Server den Link hat (speichern.js schließt nur nach
+//     „Gespeichert", nicht nach „Nur lokal gespeichert").
+// Was in der App oder auf einem anderen Gerät geschieht, zeigt das Symbol
+// erst nach dem nächsten Sync.
+//
+// Ob Chrome die Anzeige eines Tabs beim Seitenwechsel selbst zurücksetzt,
+// sagt die Doku nicht (nur: beim Schließen). Deshalb wird sie bei jeder
+// Änderung von Adresse oder Ladezustand neu gesetzt, auch auf „nicht gespeichert".
+
+// Kachel #16181d. Kette #4f8fd0 (5,22 : 1 darauf) bzw. #4cc764 (8,17 : 1) —
+// das Grün ist bewusst heller, so unterscheiden sich die Zustände auch in der
+// Helligkeit. 16 für normale, 32 für hochauflösende Bildschirme.
+const SYMBOL = { 16: 'icon-16.png', 32: 'icon-32.png' }; // wie default_icon im Manifest
+const SYMBOL_GESPEICHERT = { 16: 'icon-gespeichert-16.png', 32: 'icon-gespeichert-32.png' };
+const TITEL = 'Link-Safe Bridge'; // wie default_title im Manifest
+
+// Wörtlich aus shared.js der App (normalizeUrlForCompare samt Tracking-Liste).
+// Nach genau dieser Regel meldet die Speicherseite „Schon gespeichert", und
+// Symbol und Speicherseite dürfen sich nie widersprechen. Wird sie dort
+// geändert, gehört sie hier nach. Bewusst nicht canonicalUrl: Die dient dem
+// Mittelklick und hält Protokoll, www. und Tracking-Parameter fest.
+const TRACKING_PREFIXES = /^(utm_|mc_|pk_|piwik_|matomo_)/i;
+const TRACKING_PARAMS = new Set([
+    'fbclid', 'gclid', 'dclid', 'msclkid', 'wbraid', 'gbraid',
+    'igshid', 'yclid', 'twclid', 'ttclid', 's_kwcid', 'spm', 'si',
+]);
+
+function isTrackingParam(name) {
+    return TRACKING_PREFIXES.test(name) || TRACKING_PARAMS.has(name.toLowerCase());
+}
+
+function normalizeUrlForCompare(rawUrl) {
+    const input = String(rawUrl || '').trim();
+    try {
+        const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(input) ? input : 'https://' + input);
+        for (const key of [...url.searchParams.keys()]) {
+            if (isTrackingParam(key)) url.searchParams.delete(key);
+        }
+        const host = url.hostname.toLowerCase().replace(/^www\./, '');
+        const path = url.pathname.replace(/\/+$/, '');
+        const query = url.searchParams.toString();
+        return host + path + (query ? '?' + query : '');
+    } catch (e) {
+        return input.toLowerCase();
+    }
+}
+
+// Nacheinander statt gleichzeitig: Eine Nachlieferung und der Stand eines
+// Syncs dürfen sich nicht gegenseitig überschreiben.
+let adressQueue = Promise.resolve();
+
+function nacheinander(aufgabe) {
+    const run = adressQueue.then(aufgabe);
+    adressQueue = run.catch(() => { /* Kette nicht abreißen lassen */ });
+    return run;
+}
+
+// Vergleichsform → Ordner, gebaut aus storage.local. Lebt nur so lange wie
+// der Service Worker; danach baut die nächste Frage sie neu. adressStand
+// zählt jedes Schreiben mit — eine Karte, die während eines Schreibens
+// entstanden ist, wird nicht behalten.
+let adressCache = null;
+let adressStand = 0;
+
+async function gespeicherteAdressen() {
+    if (adressCache) return adressCache;
+    const stand = adressStand;
+    const { savedLinks = {} } = await chrome.storage.local.get(['savedLinks']);
+    const karte = new Map();
+    for (const [url, orte] of Object.values(savedLinks)) {
+        // Dieselbe Adresse zweimal gespeichert: alle Ordner beider nennen
+        const bisher = karte.get(url);
+        karte.set(url, bisher ? [...new Set([...bisher, ...orte])] : orte);
+    }
+    if (stand === adressStand) adressCache = karte;
+    return karte;
+}
+
+// Ordner, in denen die Adresse liegt — oder null, wenn sie nicht gespeichert ist
+async function gespeichertIn(url) {
+    if (!/^https?:\/\//i.test(url || '')) return null;
+    return (await gespeicherteAdressen()).get(normalizeUrlForCompare(url)) || null;
+}
+
+// Wie die Speicherseite: „A", „B" — oder „Ohne Ordner"
+function ortText(orte) {
+    return `„${orte.filter(Boolean).join('“, „') || 'Ohne Ordner'}“`;
+}
+
+async function markiereTab(tabId, url) {
+    try {
+        const orte = await gespeichertIn(url);
+        if (orte) {
+            await chrome.action.setIcon({ tabId, path: SYMBOL_GESPEICHERT });
+            await chrome.action.setTitle({ tabId, title: `${TITEL} – schon gespeichert in ${ortText(orte)}` });
+        } else {
+            await chrome.action.setIcon({ tabId, path: SYMBOL });
+            await chrome.action.setTitle({ tabId, title: TITEL });
+        }
+    } catch (e) {
+        // Tab inzwischen geschlossen — nichts zu tun
+    }
+}
+
+async function markiereAlleTabs() {
+    const tabs = await chrome.tabs.query({});
+    await Promise.all(tabs.map((tab) => markiereTab(tab.id, tab.url)));
+}
+
+// Schreibt ein Ergebnis von fetchAllLinks in die Liste. `voll` ersetzt sie
+// (Sync), sonst kommen nur die Änderungen hinein. Läuft nur in der Warteschlange.
+// Gibt true zurück, wenn eine Nachlieferung schon weiter war als dieser
+// volle Stand — deren Änderungen fehlen dann in der eben geschriebenen Liste.
+async function schreibeAdressen(adressen, bis, voll) {
+    const { savedLinks = {}, savedLinksBis = 0 } =
+        await chrome.storage.local.get(['savedLinks', 'savedLinksBis']);
+    const liste = voll ? {} : savedLinks;
+    for (const [id, eintrag] of adressen) {
+        if (eintrag) liste[id] = eintrag;
+        else delete liste[id];
+    }
+    adressStand++;
+    adressCache = null;
+    await chrome.storage.local.set({
+        savedLinks: liste,
+        savedLinksBis: voll ? bis : Math.max(bis, savedLinksBis),
+    });
+    return voll && savedLinksBis > bis;
+}
+
+// Voller Stand aus dem Sync. War eine Nachlieferung schon weiter, fehlen
+// deren Änderungen in dieser Liste — dann ab hier noch einmal nachholen.
+async function uebernehmeAdressen(adressen, bis) {
+    const ueberholt = await nacheinander(() => schreibeAdressen(adressen, bis, true));
+    await markiereAlleTabs();
+    if (ueberholt) await aktualisiereAdressen();
+}
+
+// Nur die Änderungen seit dem letzten Stand holen. Ohne Liste (erster Start
+// nach dem Update auf 1.5.0) lädt es einmal alles — die Lesezeichenleiste
+// bleibt dabei unangetastet, das macht weiter nur der Sync.
+async function aktualisiereAdressen() {
+    await nacheinander(async () => {
+        const { apiUrl, token } = await getConfig();
+        const { savedLinks, savedLinksBis } =
+            await chrome.storage.local.get(['savedLinks', 'savedLinksBis']);
+        const voll = !savedLinks || !Number.isFinite(savedLinksBis);
+        // Eine Millisekunde Überlappung wie in fetchAllLinks: Was doppelt
+        // kommt, schreibt nur denselben Stand noch einmal.
+        const ab = voll ? 0 : Math.max(0, savedLinksBis - 1);
+        const { adressen, bis } = await fetchAllLinks(apiUrl, token, ab);
+        await schreibeAdressen(adressen, bis, voll);
+    });
+    await markiereAlleTabs();
+}
+
+// Beim Start des Browsers und nach Installation oder Update
+async function richteAnzeigeEin() {
+    const { savedLinks } = await chrome.storage.local.get(['savedLinks']);
+    if (savedLinks) await markiereAlleTabs();
+    else await aktualisiereAdressen();
+}
+
+// Eine Speicherseite der Bridge hat sich geschlossen
+function nachSpeichern() {
+    aktualisiereAdressen().catch(() => { /* dann eben mit dem nächsten Sync */ });
+}
+
+// Speicherseiten im normalen Tab (Option saveInTab) — die Fenster führt
+// saveWindows, diese hier werden nur fürs Nachladen gemerkt.
+async function saveTabs() {
+    const { saveTabs: tabs = [] } = await chrome.storage.session.get(['saveTabs']);
+    return tabs;
+}
+
+async function watchSaveTab(tabId) {
+    if (!Number.isInteger(tabId)) throw new Error('Kein gültiger Tab übergeben.');
+    const tabs = await saveTabs();
+    if (!tabs.includes(tabId)) await chrome.storage.session.set({ saveTabs: [...tabs, tabId] });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (!changeInfo.url && !changeInfo.status) return;
+    markiereTab(tabId, tab.url);
+});
+
+// Chrome tauscht Tabs beim Vorladen aus — der neue trägt noch keine Anzeige
+chrome.tabs.onReplaced.addListener((addedTabId) => {
+    chrome.tabs.get(addedTabId)
+        .then((tab) => markiereTab(addedTabId, tab.url))
+        .catch(() => { /* schon wieder weg */ });
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+    saveTabs().then((tabs) => {
+        if (!tabs.includes(tabId)) return;
+        nachSpeichern();
+        return chrome.storage.session.set({ saveTabs: tabs.filter((id) => id !== tabId) });
+    }).catch(() => { /* verwaist höchstens bis zum Browser-Neustart */ });
+});
 
 // ===============================
 // MITTELKLICK IN DER LESEZEICHENLEISTE: DEN NEUEN TAB NACH VORN HOLEN

@@ -1,9 +1,9 @@
 {
     "manifest_version": 3,
     "name": "Link-Safe Bridge",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "Spiegelt deine Link-Safe-Sammlung in die Lesezeichenleiste, speichert Seiten und Notizen nach Link-Safe und prüft die Sammlung auf tote Links.",
-    "permissions": ["bookmarks", "storage", "alarms", "scripting", "activeTab"],
+    "permissions": ["bookmarks", "storage", "alarms", "scripting", "activeTab", "tabs"],
     "optional_permissions": ["webNavigation"],
     "optional_host_permissions": ["http://*/*", "https://*/*"],
     "background": {
@@ -11,12 +11,17 @@
     },
     "action": {
         "default_popup": "popup.html",
-        "default_title": "Link-Safe Bridge"
+        "default_title": "Link-Safe Bridge",
+        "default_icon": {
+            "16": "icon-16.png",
+            "32": "icon-32.png"
+        }
     },
     "options_page": "options.html",
     "icons": {
-        "16": "icon.png",
-        "48": "icon.png",
-        "128": "icon.png"
+        "16": "icon-16.png",
+        "32": "icon-32.png",
+        "48": "icon-48.png",
+        "128": "icon-128.png"
     }
 }
