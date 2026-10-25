@@ -3,7 +3,7 @@
 Die Browser-Erweiterung zu [Link-Safe](https://link-safe.taenzer.net). Sie kann viererlei:
 
 - **Spiegeln:** deine Link-Safe-Sammlung als Ordner in der Lesezeichenleiste —
-  einweg (Link-Safe → Browser), automatisch alle 15 Minuten
+  einweg (Link-Safe → Browser), automatisch bei jedem Browserstart
 - **Speichern:** die aktuelle Seite oder eine schnelle Notiz nach Link-Safe geben
 - **Erkennen:** die Kette im Symbol wird grün, wenn die offene Seite schon in
   Link-Safe liegt
@@ -23,7 +23,7 @@ Eigene Lesezeichen außerhalb des gespiegelten Ordners werden nie angefasst.
    - **Token**: der `api_token` aus `api/config.php`
 6. **Speichern & Verbindung testen** — beim Speichern fragt der Browser einmalig
    nach der Berechtigung für die API-Domain
-7. Der erste Sync startet sofort; danach alle 15 Minuten und jederzeit manuell
+7. Der erste Sync startet sofort; danach bei jedem Browserstart und jederzeit manuell
    über das Popup („Jetzt synchronisieren")
 
 ## Wie das Spiegeln funktioniert
@@ -31,6 +31,9 @@ Eigene Lesezeichen außerhalb des gespiegelten Ordners werden nie angefasst.
 - Der Service Worker holt alle aktiven Links (`GET /links`, Read-only-Token,
   Papierkorb wird übersprungen) und baut die Ordnerstruktur im
   Lesezeichen-Ordner „Link-Safe" komplett neu auf
+- Das geschieht bei jedem Browserstart und auf Knopfdruck, sonst nicht —
+  bis 1.5.0 lief es zusätzlich alle 15 Minuten. Was zwischendurch in der App
+  geändert wird, kommt mit dem nächsten Start oder über „Jetzt synchronisieren"
 - Der Token kann nur lesen — selbst wenn er in falsche Hände gerät,
   kann damit nichts verändert oder gelöscht werden. Deshalb schreibt auch die
   Link-Prüfung ihr Ergebnis nicht selbst zurück, sondern übergibt es der App
@@ -102,7 +105,7 @@ Knopf heißt dann **„➕ Trotzdem speichern"**.
 - Nach dem Speichern über die Extension wird die Kette grün, sobald sich die
   Speicherseite schließt. Was in der App oder auf einem anderen Gerät
   gespeichert, verschoben oder gelöscht wird, zeigt das Symbol mit dem
-  nächsten Sync (alle 15 Minuten, oder sofort über „Jetzt synchronisieren")
+  nächsten Sync (beim nächsten Browserstart, oder sofort über „Jetzt synchronisieren")
 - Nur für Links auf http/https-Seiten; Notizen und der Papierkorb zählen
   nicht mit. Leitet eine Seite auf eine andere Adresse um, ist die Kette nur
   an der Adresse grün, die gespeichert ist
@@ -164,9 +167,10 @@ nicht: Sie kennt deren Lesezeichen-IDs nicht. Solche Reste müssen von Hand weg
 
 ## Links prüfen (Link-Rot-Wächter)
 
-Popup → **„🔍 Links prüfen"** öffnet die Prüfseite. Sie schickt an jeden Link
-eine einzelne HTTP-Anfrage (HEAD, bei zickigen Servern GET mit sofort
-verworfenem Rumpf), 20 gleichzeitig, 15 s Zeitlimit. **Es wird keine Seite
+Optionen → **„🔍 Links prüfen"** öffnet die Prüfseite (bis 1.5.0 saß der Knopf
+im Popup). Sie schickt an jeden Link eine einzelne HTTP-Anfrage (HEAD, bei
+zickigen Servern GET mit sofort verworfenem Rumpf), 20 gleichzeitig, 15 s
+Zeitlimit. **Es wird keine Seite
 geöffnet und nichts gerendert** — kein Tab, kein fremdes JavaScript, kein
 Eintrag im Verlauf.
 

@@ -24,6 +24,7 @@
         }
         button:disabled { opacity: 0.6; cursor: wait; }
         button.secondary { background: #2b2f38; color: #e9e7de; }
+        #sync-hint { font-size: 0.75rem; color: #9a9890; line-height: 1.4; margin: 6px 0 0; }
         hr { border: none; border-top: 1px solid #2b303b; margin: 16px 0 4px; }
         a { display: block; margin-top: 10px; color: #4f8fd0; font-size: 0.78rem; text-align: center; }
     </style>
@@ -35,8 +36,8 @@
     <button id="save-note" class="secondary">📝 Notiz schreiben</button>
     <hr>
     <div id="info">Lade Status …</div>
-    <button id="sync" class="secondary">🔄 Jetzt synchronisieren</button>
-    <button id="check" class="secondary">🔍 Links prüfen</button>
+    <button id="sync" class="secondary" aria-describedby="sync-hint">🔄 Jetzt synchronisieren</button>
+    <p id="sync-hint">Die Lesezeichenleiste wird bei jedem Browserstart aktualisiert, sonst nur über diesen Knopf.</p>
     <a href="#" id="openOptions">Optionen öffnen</a>
     <script src="popup.js"></script>
 </body>

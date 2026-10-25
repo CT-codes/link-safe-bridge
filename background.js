@@ -5,25 +5,21 @@
 // der Extension und wird bei jedem Sync komplett neu erzeugt — eigene
 // Lesezeichen außerhalb dieses Ordners werden nie angefasst.
 
-const SYNC_ALARM = 'linksafe-sync';
 const MIRROR_TITLE = 'Link-Safe';
 const FAVORITES_TITLE = 'Favoriten'; // Hauptordner-Name in der App (CONFIG.FAVORITES_FOLDER)
 const BOOKMARKS_BAR_ID = '1'; // Lesezeichenleiste in Chromium
 
 chrome.runtime.onInstalled.addListener(() => {
-    chrome.alarms.create(SYNC_ALARM, { periodInMinutes: 15 });
     richteAnzeigeEin().catch(() => { /* ohne Optionen noch nichts anzuzeigen */ });
 });
 
+// Der Spiegel entsteht bei jedem Browserstart neu und sonst nur auf Knopfdruck
+// (Popup, Optionen). Bis 1.5.0 lief er zusätzlich alle 15 Minuten über einen
+// Alarm — jeder Lauf baut den ganzen Ordner ab und wieder auf, das war zu oft.
+// Die Berechtigung "alarms" ist mit dem Alarm entfallen.
 chrome.runtime.onStartup.addListener(() => {
-    chrome.alarms.create(SYNC_ALARM, { periodInMinutes: 15 });
     richteAnzeigeEin().catch(() => { /* ohne Optionen noch nichts anzuzeigen */ });
-});
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === SYNC_ALARM) {
-        syncBookmarks().catch((e) => setStatus('Fehler: ' + e.message));
-    }
+    syncBookmarks().catch((e) => setStatus('Fehler: ' + e.message));
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -779,7 +775,7 @@ async function syncBookmarks() {
 // Die Liste liegt in storage.local — savedLinks: ID → [Vergleichsform,
 // Ordner], savedLinksBis: jüngster Zeitstempel darin. Aktuell hält sie sich
 // auf zwei Wegen:
-//   - Jeder Sync baut sie neu (alle 15 Minuten und auf Knopfdruck).
+//   - Jeder Sync baut sie neu (bei jedem Browserstart und auf Knopfdruck).
 //   - Schließt sich eine Speicherseite, die die Bridge geöffnet hat, kommt
 //     nur nach, was sich seit savedLinksBis geändert hat. Die Seite geht erst
 //     zu, wenn der Server den Link hat (speichern.js schließt nur nach

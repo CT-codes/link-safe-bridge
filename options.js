@@ -1,5 +1,6 @@
 // Optionen: API-URL + Token speichern, Host-Berechtigung anfordern, Verbindung
-// testen — dazu die zwei Selbsthilfen für den Fall, dass etwas klemmt.
+// testen — dazu die Link-Prüfung und die zwei Selbsthilfen für den Fall,
+// dass etwas klemmt.
 
 const apiUrlInput = document.getElementById('apiUrl');
 const tokenInput = document.getElementById('token');
@@ -126,6 +127,15 @@ document.getElementById('save').addEventListener('click', async () => {
     } catch (e) {
         show('Gespeichert, aber Verbindung fehlgeschlagen: ' + e.message, false);
     }
+});
+
+// --- Links prüfen ---
+
+// Die Prüfung läuft in einer eigenen Seite, damit ein mehrminütiger Lauf nicht
+// an dieser hängt. Bis 1.5.0 saß der Knopf im Popup; seit 1.6.0 hier, das
+// Popup bleibt den Dingen für jeden Tag vorbehalten.
+document.getElementById('check').addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('check.html') });
 });
 
 // --- Selbsthilfe ---

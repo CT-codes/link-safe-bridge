@@ -222,13 +222,6 @@ syncBtn.addEventListener('click', async () => {
     syncBtn.textContent = '🔄 Jetzt synchronisieren';
 });
 
-// Die Prüfung läuft in einer eigenen Seite: das Popup schließt sich, sobald
-// es den Fokus verliert — ein mehrminütiger Lauf würde darin abbrechen.
-document.getElementById('check').addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('check.html') });
-    window.close();
-});
-
 document.getElementById('openOptions').addEventListener('click', (e) => {
     e.preventDefault();
     chrome.runtime.openOptionsPage();
